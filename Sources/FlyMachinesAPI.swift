@@ -66,8 +66,8 @@ struct FlyMachinesAPI: Sendable {
         machineID: String,
         state: String,
         timeout: Int = 60
-    ) async throws -> FlyMachine {
-        try await get(
+    ) async throws {
+        let _: FlyWaitResponse = try await get(
             path: "/v1/apps/\(app)/machines/\(machineID)/wait",
             queryItems: [
                 URLQueryItem(name: "state", value: state),
@@ -279,6 +279,14 @@ struct FlyVolume: Decodable {
     let sizeGb: Int?
     let attachedMachineId: String?
     let attachedAllocId: String?
+}
+
+/// Response from the /wait endpoint — different shape from FlyMachine.
+struct FlyWaitResponse: Decodable {
+    let ok: Bool?
+    let state: String?
+    let eventId: String?
+    let version: String?
 }
 
 /// Used for endpoints that return 200 with empty or minimal body.
