@@ -126,9 +126,11 @@ final class FlyMachineController {
 
             try Task.checkCancellation()
 
-            // Step 4: Launch fly proxy for SSH tunnel
+            // Step 4: Get machine private IP and launch fly proxy
             workspace.cloudMachineState = .waitingForSSH
-            let port = try await launchFlyProxy(flyPath: flyPath, machineID: machineID)
+            let machine = try await api.getMachine(app: configuration.appName, machineID: machineID)
+            let privateIP = machine.privateIp ?? ""
+            let port = try await launchFlyProxy(flyPath: flyPath, machineID: machineID, privateIP: privateIP)
             localSSHPort = port
 
             try Task.checkCancellation()
@@ -189,8 +191,8 @@ final class FlyMachineController {
                     cpus: spec.cpus,
                     memoryMb: spec.memoryMB
                 ),
-                env: ["CMUX_CLOUD": "1"],
-                init: .init(exec: ["/bin/sh", "-c", initScript]),
+                env: ["CMUX_CLOUD": "1", "SSH_PUBKEY": sshPublicKey],
+                init: .init(exec: ["/bin/bash", "-c", initScript]),
                 mounts: mounts,
                 services: nil
             )
@@ -213,23 +215,22 @@ final class FlyMachineController {
 
     // MARK: - Fly Proxy
 
-    private func launchFlyProxy(flyPath: String, machineID: String) async throws -> Int {
+    private func launchFlyProxy(flyPath: String, machineID: String, privateIP: String) async throws -> Int {
         let localPort = try Self.findAvailablePort()
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: flyPath)
-        process.arguments = [
-            "proxy",
-            "\(localPort):22",
-            "-a", configuration.appName,
-            "-s",
-        ]
+        // Pass the machine's private IP as remote_host to avoid interactive prompt
+        var args = ["proxy", "\(localPort):22"]
+        if !privateIP.isEmpty {
+            args.append(privateIP)
+        }
+        args += ["-a", configuration.appName, "-q"]
+        process.arguments = args
         process.environment = ProcessInfo.processInfo.environment
         if let token = api.token as String? {
             process.environment?["FLY_API_TOKEN"] = token
         }
-        // Select the specific machine
-        process.environment?["FLY_MACHINE"] = machineID
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 

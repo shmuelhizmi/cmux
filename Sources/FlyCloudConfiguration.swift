@@ -81,39 +81,23 @@ enum FlyCloudMachineState: String, Codable, Sendable {
 extension FlyCloudConfiguration {
     /// Shell script used as the machine's init command.
     /// Installs sshd, injects the user's public key, and starts sshd in the foreground.
+    /// Shell script for machine init. The SSH public key is embedded directly.
     static func machineInitScript(sshPublicKey: String, sshUser: String) -> String {
-        // The script:
-        // 1. Installs openssh-server if missing
-        // 2. Creates .ssh dir for the target user
-        // 3. Writes the authorized key
-        // 4. Generates host keys if missing
-        // 5. Creates /run/sshd (required by some distros)
-        // 6. Execs sshd in the foreground so PID 1 stays alive
-        return """
-        #!/bin/sh
-        set -e
-        if ! command -v sshd >/dev/null 2>&1; then
-            if command -v apt-get >/dev/null 2>&1; then
-                export DEBIAN_FRONTEND=noninteractive
-                apt-get update -qq && apt-get install -y -qq openssh-server >/dev/null
-            elif command -v apk >/dev/null 2>&1; then
-                apk add --no-cache openssh-server >/dev/null
-            elif command -v yum >/dev/null 2>&1; then
-                yum install -y -q openssh-server >/dev/null
-            fi
-        fi
-        USER_HOME=$(eval echo ~\(sshUser))
-        mkdir -p "$USER_HOME/.ssh"
-        echo '\(sshPublicKey)' >> "$USER_HOME/.ssh/authorized_keys"
-        chmod 700 "$USER_HOME/.ssh"
-        chmod 600 "$USER_HOME/.ssh/authorized_keys"
-        if [ "\(sshUser)" != "root" ]; then
-            chown -R \(sshUser):\(sshUser) "$USER_HOME/.ssh" 2>/dev/null || true
-        fi
-        ssh-keygen -A 2>/dev/null || true
-        mkdir -p /run/sshd
-        exec /usr/sbin/sshd -D -e
-        """
+        let home = sshUser == "root" ? "/root" : "/home/\(sshUser)"
+        // Base64-encode the pubkey to avoid any shell escaping issues
+        let b64Key = Data(sshPublicKey.utf8).base64EncodedString()
+        return [
+            "apt-get update -qq",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server >/dev/null 2>&1",
+            "mkdir -p \(home)/.ssh /run/sshd",
+            "echo \(b64Key) | base64 -d > \(home)/.ssh/authorized_keys",
+            "chmod 700 \(home)/.ssh",
+            "chmod 600 \(home)/.ssh/authorized_keys",
+            "ssh-keygen -A",
+            "mkdir -p /etc/ssh/sshd_config.d",
+            "printf 'PermitRootLogin yes\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-cmux.conf",
+            "/usr/sbin/sshd -D -e",
+        ].joined(separator: " && ")
     }
 }
 
