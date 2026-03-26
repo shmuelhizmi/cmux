@@ -7,8 +7,8 @@ import Security
 /// Uses the data protection keychain (supports Touch ID / Apple Watch unlock).
 /// Falls back to the `DAYTONA_API_KEY` environment variable.
 enum DaytonaAuthTokenStore {
-    private static let keychainService = "com.cmux.daytona-api-key"
-    private static let keychainAccount = "daytona-api-key"
+    private static let keychainService = "cmux"
+    private static let keychainAccount = "Daytona API Key"
 
     /// Returns the Daytona API key, checking Keychain then environment.
     static func token() -> String? {

@@ -79,6 +79,8 @@ struct NewCloudWorkspaceSheet: View {
     @State private var newBranchName: String = ""
     @State private var newBranchBase: String = "main"
     @State private var errorMessage: String?
+    @State private var needsApiKey: Bool = DaytonaAuthTokenStore.token() == nil
+    @State private var apiKeyInput: String = ""
 
     private var filteredItems: [CloudWorkspaceItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -110,6 +112,10 @@ struct NewCloudWorkspaceSheet: View {
             .padding(.vertical, 12)
 
             Divider()
+
+            if needsApiKey {
+                apiKeyInputSection
+            }
 
             if showCreateBranchInput {
                 createBranchForm
@@ -324,6 +330,48 @@ struct NewCloudWorkspaceSheet: View {
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 4)
+    }
+
+    // MARK: - API Key Input
+
+    private var apiKeyInputSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "cloud.apiKey.title", defaultValue: "Daytona API Key"))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                SecureField(
+                    String(localized: "cloud.apiKey.placeholder", defaultValue: "Paste your API key..."),
+                    text: $apiKeyInput
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13))
+                .onSubmit { saveApiKey() }
+                Button(String(localized: "cloud.apiKey.save", defaultValue: "Save")) {
+                    saveApiKey()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text(String(localized: "cloud.apiKey.hint", defaultValue: "Get your key at app.daytona.io. Stored securely in Keychain."))
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+
+    private func saveApiKey() {
+        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        if DaytonaAuthTokenStore.setToken(key) {
+            needsApiKey = false
+            apiKeyInput = ""
+        } else {
+            errorMessage = String(localized: "cloud.apiKey.error", defaultValue: "Failed to store API key in Keychain")
+        }
     }
 
     // MARK: - Create Branch Form

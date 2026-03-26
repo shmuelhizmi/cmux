@@ -6957,7 +6957,7 @@ struct ContentView: View {
 
     private func cloudProvisioningPreconditionError() -> String? {
         if DaytonaAuthTokenStore.token() == nil {
-            return String(localized: "cloud.error.noApiKey", defaultValue: "No Daytona API key configured. Set DAYTONA_API_KEY environment variable or run: cmux cloud configure-token")
+            return String(localized: "cloud.error.noApiKey", defaultValue: "Enter your Daytona API key above to continue.")
         }
         return nil
     }
