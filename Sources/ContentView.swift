@@ -967,6 +967,79 @@ private final class PassthroughWindowOverlayContainerView: NSView {
     }
 }
 
+/// Lightweight overlay controller for modals that need to sit above AppKit portal views
+/// but don't need the command palette's aggressive focus lock timer.
+@MainActor
+private final class WindowSimpleOverlayController: NSObject {
+    private weak var window: NSWindow?
+    private let containerView = CommandPaletteOverlayContainerView(frame: .zero)
+    private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
+    private var installConstraints: [NSLayoutConstraint] = []
+    private weak var installedThemeFrame: NSView?
+
+    init(window: NSWindow) {
+        self.window = window
+        super.init()
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.wantsLayer = true
+        containerView.layer?.backgroundColor = NSColor.clear.cgColor
+        containerView.isHidden = true
+        containerView.alphaValue = 0
+        containerView.capturesMouseEvents = false
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        containerView.addSubview(hostingView)
+        NSLayoutConstraint.activate([
+            hostingView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            hostingView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+        ])
+        _ = ensureInstalled()
+    }
+
+    @discardableResult
+    private func ensureInstalled() -> Bool {
+        guard let window,
+              let contentView = window.contentView,
+              let themeFrame = contentView.superview else { return false }
+        if containerView.superview !== themeFrame {
+            NSLayoutConstraint.deactivate(installConstraints)
+            installConstraints.removeAll()
+            containerView.removeFromSuperview()
+            themeFrame.addSubview(containerView, positioned: .above, relativeTo: nil)
+            installConstraints = [
+                containerView.topAnchor.constraint(equalTo: contentView.topAnchor),
+                containerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+                containerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                containerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            ]
+            NSLayoutConstraint.activate(installConstraints)
+            installedThemeFrame = themeFrame
+        }
+        return true
+    }
+
+    func update(rootView: AnyView, isVisible: Bool) {
+        guard ensureInstalled() else { return }
+        if isVisible {
+            hostingView.rootView = rootView
+            containerView.capturesMouseEvents = true
+            containerView.isHidden = false
+            containerView.alphaValue = 1
+            if let themeFrame = installedThemeFrame, containerView.superview === themeFrame {
+                themeFrame.addSubview(containerView, positioned: .above, relativeTo: nil)
+            }
+        } else {
+            hostingView.rootView = AnyView(EmptyView())
+            containerView.capturesMouseEvents = false
+            containerView.alphaValue = 0
+            containerView.isHidden = true
+        }
+    }
+}
+
 @MainActor
 private final class WindowCommandPaletteOverlayController: NSObject {
     private weak var window: NSWindow?
@@ -1284,11 +1357,11 @@ private func commandPaletteWindowOverlayController(for window: NSWindow) -> Wind
 }
 
 @MainActor
-private func cloudWorkspaceModalOverlayController(for window: NSWindow) -> WindowCommandPaletteOverlayController {
-    if let existing = objc_getAssociatedObject(window, &cloudWorkspaceModalWindowOverlayKey) as? WindowCommandPaletteOverlayController {
+private func cloudWorkspaceModalOverlayController(for window: NSWindow) -> WindowSimpleOverlayController {
+    if let existing = objc_getAssociatedObject(window, &cloudWorkspaceModalWindowOverlayKey) as? WindowSimpleOverlayController {
         return existing
     }
-    let controller = WindowCommandPaletteOverlayController(window: window)
+    let controller = WindowSimpleOverlayController(window: window)
     objc_setAssociatedObject(window, &cloudWorkspaceModalWindowOverlayKey, controller, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     return controller
 }

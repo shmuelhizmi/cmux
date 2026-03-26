@@ -1,19 +1,57 @@
 import SwiftUI
 
-// MARK: - Mode
+// MARK: - Item Model
 
-enum CloudWorkspaceCreationMode: Int, CaseIterable, Identifiable {
+enum CloudWorkspaceItem: Identifiable, Equatable {
+    case pr(number: Int, title: String, branch: String, repoSlug: String)
+    case branch(name: String)
     case createBranch
-    case importBranch
-    case importPR
 
-    var id: Int { rawValue }
+    var id: String {
+        switch self {
+        case .pr(let n, _, _, _): return "pr-\(n)"
+        case .branch(let name): return "branch-\(name)"
+        case .createBranch: return "create-branch"
+        }
+    }
+
+    var searchText: String {
+        switch self {
+        case .pr(let n, let title, let branch, _): return "PR #\(n) \(title) \(branch)"
+        case .branch(let name): return name
+        case .createBranch: return "create new branch"
+        }
+    }
 
     var label: String {
         switch self {
-        case .createBranch: return String(localized: "cloud.mode.createBranch", defaultValue: "Create Branch")
-        case .importBranch: return String(localized: "cloud.mode.importBranch", defaultValue: "Import Branch")
-        case .importPR: return String(localized: "cloud.mode.importPR", defaultValue: "Import PR")
+        case .pr(let n, let title, _, _): return "#\(n) \(title)"
+        case .branch(let name): return name
+        case .createBranch: return String(localized: "cloud.item.createBranch", defaultValue: "Create new branch...")
+        }
+    }
+
+    var detail: String? {
+        switch self {
+        case .pr(_, _, let branch, _): return branch
+        case .branch: return nil
+        case .createBranch: return nil
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .pr: return "arrow.triangle.pull"
+        case .branch: return "arrow.triangle.branch"
+        case .createBranch: return "plus"
+        }
+    }
+
+    var iconColor: Color {
+        switch self {
+        case .pr: return .green
+        case .branch: return .secondary
+        case .createBranch: return .accentColor
         }
     }
 }
@@ -26,47 +64,227 @@ struct NewCloudWorkspaceSheet: View {
     var onLocalWorkspace: () -> Void
     var onDismiss: (() -> Void)?
 
-    @State private var mode: CloudWorkspaceCreationMode = .importBranch
-    @State private var repoURL: String = ""
-    @State private var branchName: String = ""
-    @State private var baseBranch: String = "main"
-    @State private var newBranchName: String = ""
-    @State private var prIdentifier: String = ""
+    @State private var searchText: String = ""
+    @State private var items: [CloudWorkspaceItem] = []
+    @State private var isLoading: Bool = true
+    @State private var selectedIndex: Int = 0
+    @State private var detectedRepoSlug: String?
+    @State private var detectedRepoURL: String?
+    @State private var detectedHead: String?
     @State private var flyAppName: String = ""
-    @State private var image: String = "ubuntu:24.04"
-    @State private var showAdvanced: Bool = false
-    @State private var isResolving: Bool = false
-    @State private var resolvedPRBranch: String?
-    @State private var resolvedPRRepoSlug: String?
+    @State private var showCreateBranchInput: Bool = false
+    @State private var newBranchName: String = ""
+    @State private var newBranchBase: String = "main"
     @State private var errorMessage: String?
 
-    private var canSubmit: Bool {
-        guard !flyAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard !repoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        switch mode {
-        case .createBranch:
-            return !newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .importBranch:
-            return !branchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .importPR:
-            return !prIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+    private var filteredItems: [CloudWorkspaceItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return items }
+        return items.filter { $0.searchText.lowercased().contains(query) }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(String(localized: "cloud.sheet.title", defaultValue: "New Cloud Workspace"))
-                .font(.title3.weight(.semibold))
-
-            Picker("", selection: $mode) {
-                ForEach(CloudWorkspaceCreationMode.allCases) { m in
-                    Text(m.label).tag(m)
+        VStack(spacing: 0) {
+            // Search field
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+                TextField(
+                    String(localized: "cloud.search.placeholder", defaultValue: "Search branches and pull requests..."),
+                    text: $searchText
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .onSubmit { selectCurrentItem() }
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
-            formFields
+            Divider()
+
+            if showCreateBranchInput {
+                createBranchForm
+            } else {
+                // Results list
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            if !filteredItems.isEmpty {
+                                let prs = filteredItems.filter { if case .pr = $0 { return true }; return false }
+                                let branches = filteredItems.filter { if case .branch = $0 { return true }; return false }
+                                let actions = filteredItems.filter { if case .createBranch = $0 { return true }; return false }
+
+                                if !prs.isEmpty {
+                                    sectionHeader(String(localized: "cloud.section.prs", defaultValue: "Open Pull Requests"))
+                                    ForEach(Array(prs.enumerated()), id: \.element.id) { _, item in
+                                        itemRow(item)
+                                    }
+                                }
+
+                                if !branches.isEmpty {
+                                    sectionHeader(String(localized: "cloud.section.branches", defaultValue: "Branches"))
+                                    ForEach(Array(branches.enumerated()), id: \.element.id) { _, item in
+                                        itemRow(item)
+                                    }
+                                }
+
+                                if !actions.isEmpty {
+                                    Divider().padding(.vertical, 4)
+                                    ForEach(Array(actions.enumerated()), id: \.element.id) { _, item in
+                                        itemRow(item)
+                                    }
+                                }
+                            } else if !isLoading {
+                                Text(String(localized: "cloud.search.noResults", defaultValue: "No results found"))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .padding(16)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(maxHeight: 320)
+                    .onChange(of: selectedIndex) { _, newValue in
+                        let items = filteredItems
+                        guard newValue >= 0, newValue < items.count else { return }
+                        proxy.scrollTo(items[newValue].id, anchor: .center)
+                    }
+                }
+
+                Divider()
+
+                // Footer
+                HStack {
+                    Button(String(localized: "cloud.sheet.localWorkspace", defaultValue: "Local workspace")) {
+                        onLocalWorkspace()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    if let slug = detectedRepoSlug {
+                        Text(slug)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+        }
+        .accessibilityIdentifier("NewCloudWorkspaceSheet")
+        .onAppear { loadData() }
+        .onExitCommand { onDismiss?() }
+        .background(keyboardHandler)
+    }
+
+    // MARK: - Keyboard Navigation
+
+    private var keyboardHandler: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onMoveCommand { direction in
+                let items = filteredItems
+                guard !items.isEmpty else { return }
+                switch direction {
+                case .down:
+                    selectedIndex = min(selectedIndex + 1, items.count - 1)
+                case .up:
+                    selectedIndex = max(selectedIndex - 1, 0)
+                default: break
+                }
+            }
+    }
+
+    // MARK: - Item Row
+
+    private func itemRow(_ item: CloudWorkspaceItem) -> some View {
+        let idx = filteredItems.firstIndex(of: item)
+        let isSelected = idx == selectedIndex
+
+        return Button {
+            if let idx { selectedIndex = idx }
+            selectItem(item)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: item.iconName)
+                    .font(.system(size: 12))
+                    .foregroundStyle(item.iconColor)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.label)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let detail = item.detail {
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                if case .branch(let name) = item, name == detectedHead {
+                    Text("HEAD")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color(nsColor: .separatorColor).opacity(0.3))
+                        )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                isSelected
+                    ? RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.15))
+                        .padding(.horizontal, 4)
+                    : nil
+            )
+        }
+        .buttonStyle(.plain)
+        .id(item.id)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+    }
+
+    // MARK: - Create Branch Form
+
+    private var createBranchForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LabeledField(String(localized: "cloud.field.baseBranch", defaultValue: "Base Branch")) {
+                TextField("main", text: $newBranchBase)
+                    .textFieldStyle(.roundedBorder)
+            }
+            LabeledField(String(localized: "cloud.field.newBranchName", defaultValue: "New Branch Name")) {
+                TextField("feature/my-feature", text: $newBranchName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { submitCreateBranch() }
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -74,305 +292,207 @@ struct NewCloudWorkspaceSheet: View {
                     .foregroundStyle(.red)
             }
 
-            if showAdvanced {
-                advancedFields
-            } else {
-                Button(String(localized: "cloud.sheet.showAdvanced", defaultValue: "Advanced...")) {
-                    withAnimation { showAdvanced = true }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            }
-
             HStack {
-                Button(String(localized: "cloud.sheet.cancel", defaultValue: "Cancel")) {
-                    onDismiss?()
+                Button(String(localized: "cloud.sheet.back", defaultValue: "Back")) {
+                    showCreateBranchInput = false
+                    errorMessage = nil
                 }
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
                 Button(String(localized: "cloud.sheet.create", defaultValue: "Create Workspace")) {
-                    submit()
+                    submitCreateBranch()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!canSubmit || isResolving)
-            }
-
-            Divider()
-
-            Button(String(localized: "cloud.sheet.localWorkspace", defaultValue: "or create a local workspace")) {
-                onLocalWorkspace()
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .padding(24)
-        .accessibilityIdentifier("NewCloudWorkspaceSheet")
-        .onAppear {
-            autoDetectRepo()
-        }
-    }
-
-    // MARK: - Form Fields
-
-    @ViewBuilder
-    private var formFields: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            LabeledField(String(localized: "cloud.field.repoURL", defaultValue: "Repository URL")) {
-                TextField("https://github.com/owner/repo", text: $repoURL)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            switch mode {
-            case .createBranch:
-                LabeledField(String(localized: "cloud.field.baseBranch", defaultValue: "Base Branch")) {
-                    TextField("main", text: $baseBranch)
-                        .textFieldStyle(.roundedBorder)
-                }
-                LabeledField(String(localized: "cloud.field.newBranchName", defaultValue: "New Branch Name")) {
-                    TextField("feature/my-feature", text: $newBranchName)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-            case .importBranch:
-                LabeledField(String(localized: "cloud.field.branchName", defaultValue: "Branch Name")) {
-                    TextField("main", text: $branchName)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-            case .importPR:
-                LabeledField(String(localized: "cloud.field.prIdentifier", defaultValue: "Pull Request")) {
-                    HStack {
-                        TextField("owner/repo#123 or PR URL", text: $prIdentifier)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { resolvePR() }
-                        if isResolving {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-                }
-                if let resolvedPRBranch {
-                    Text("Branch: \(resolvedPRBranch)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
+                .disabled(newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-    }
-
-    @ViewBuilder
-    private var advancedFields: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Divider()
-            LabeledField(String(localized: "cloud.field.flyApp", defaultValue: "Fly.io App Name")) {
-                TextField("my-dev-app", text: $flyAppName)
-                    .textFieldStyle(.roundedBorder)
-            }
-            LabeledField(String(localized: "cloud.field.image", defaultValue: "Docker Image")) {
-                TextField("ubuntu:24.04", text: $image)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
+        .padding(16)
     }
 
     // MARK: - Actions
 
-    private func submit() {
-        errorMessage = nil
-        let trimmedApp = flyAppName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedRepo = repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func selectCurrentItem() {
+        let items = filteredItems
+        guard selectedIndex >= 0, selectedIndex < items.count else { return }
+        selectItem(items[selectedIndex])
+    }
 
-        guard !trimmedApp.isEmpty else {
-            errorMessage = "Fly.io app name is required"
-            return
-        }
-        guard !trimmedRepo.isEmpty else {
-            errorMessage = "Repository URL is required"
-            return
-        }
-
-        let modeString: String
-        let gitBranch: String?
-        let gitBaseBranch: String?
-        let gitNewBranch: String?
-        var prNumber: Int?
-        var repoSlug: String?
-        var workspaceLabel: String?
-
-        switch mode {
+    private func selectItem(_ item: CloudWorkspaceItem) {
+        switch item {
+        case .pr(let number, let title, _, let slug):
+            submitPR(number: number, title: title, repoSlug: slug)
+        case .branch(let name):
+            submitBranch(name: name)
         case .createBranch:
-            modeString = "create_branch"
-            gitBranch = nil
-            gitBaseBranch = baseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
-            gitNewBranch = newBranchName.trimmingCharacters(in: .whitespacesAndNewlines)
-            workspaceLabel = gitNewBranch
-
-        case .importBranch:
-            modeString = "import_branch"
-            gitBranch = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
-            gitBaseBranch = nil
-            gitNewBranch = nil
-            workspaceLabel = gitBranch
-
-        case .importPR:
-            modeString = "import_pr"
-            gitBranch = resolvedPRBranch
-            gitBaseBranch = nil
-            gitNewBranch = nil
-            let parsed = Self.parsePRIdentifier(prIdentifier)
-            prNumber = parsed.number
-            repoSlug = parsed.repoSlug ?? resolvedPRRepoSlug
-            workspaceLabel = prNumber.map { "PR #\($0)" }
+            showCreateBranchInput = true
         }
+    }
 
+    private func submitBranch(name: String) {
+        guard let repoURL = effectiveRepoURL() else { return }
         let script = FlyCloudConfiguration.buildGitSetupScript(
-            mode: modeString,
-            repoURL: trimmedRepo,
-            branchName: gitBranch,
-            baseBranch: gitBaseBranch,
-            newBranchName: gitNewBranch,
-            prNumber: prNumber,
-            repoSlug: repoSlug
+            mode: "import_branch", repoURL: repoURL, branchName: name
         )
+        let config = buildConfig(gitSetupScript: script)
+        onSubmit(config, name)
+    }
 
-        let config = FlyCloudConfiguration(
-            appName: trimmedApp,
-            machineSpec: FlyCloudMachineSpec(
-                cpuKind: "shared",
-                cpus: 1,
-                memoryMB: 1024,
-                image: image.trimmingCharacters(in: .whitespacesAndNewlines),
-                region: nil,
-                volumeSizeGB: 10
-            ),
+    private func submitPR(number: Int, title: String, repoSlug: String) {
+        guard let repoURL = effectiveRepoURL() else { return }
+        let script = FlyCloudConfiguration.buildGitSetupScript(
+            mode: "import_pr", repoURL: repoURL, prNumber: number, repoSlug: repoSlug
+        )
+        let label = "#\(number) \(title)"
+        let config = buildConfig(gitSetupScript: script)
+        onSubmit(config, label)
+    }
+
+    private func submitCreateBranch() {
+        let name = newBranchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        guard let repoURL = effectiveRepoURL() else { return }
+        let base = newBranchBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let script = FlyCloudConfiguration.buildGitSetupScript(
+            mode: "create_branch", repoURL: repoURL,
+            baseBranch: base.isEmpty ? "main" : base,
+            newBranchName: name
+        )
+        let config = buildConfig(gitSetupScript: script)
+        onSubmit(config, name)
+    }
+
+    private func effectiveRepoURL() -> String? {
+        if let url = detectedRepoURL, !url.isEmpty { return url }
+        if let slug = detectedRepoSlug, !slug.isEmpty {
+            return "https://github.com/\(slug).git"
+        }
+        errorMessage = "Could not detect repository"
+        return nil
+    }
+
+    private func buildConfig(gitSetupScript: String) -> FlyCloudConfiguration {
+        let app = flyAppName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let appName = app.isEmpty ? (detectedRepoSlug?.replacingOccurrences(of: "/", with: "-") ?? "dev") : app
+        return FlyCloudConfiguration(
+            appName: appName,
+            machineSpec: .default,
             volumeName: "workspace-data",
             sshUser: "root",
-            gitSetupScript: script,
-            workspaceLabel: workspaceLabel
+            gitSetupScript: gitSetupScript
         )
-
-        onSubmit(config, workspaceLabel)
     }
 
-    private func autoDetectRepo() {
-        guard let dir = currentDirectory, !dir.isEmpty else { return }
+    // MARK: - Data Loading
+
+    private func loadData() {
+        guard let dir = currentDirectory, !dir.isEmpty else {
+            isLoading = false
+            items = [.createBranch]
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
+            // Detect repo
             let slugs = GitHubService.repositorySlugs(directory: dir)
-            guard let first = slugs.first else { return }
-            let url = "https://github.com/\(first).git"
+            let slug = slugs.first
+            let repoURL = slug.map { "https://github.com/\($0).git" }
+
+            // Detect HEAD
+            let head = Self.detectHead(directory: dir)
+
+            // Fetch branches
+            let branches = Self.fetchBranches(directory: dir)
+
+            // Fetch open PRs
+            var prs: [CloudWorkspaceItem] = []
+            if let slug {
+                prs = Self.fetchOpenPRs(repoSlug: slug)
+            }
+
             DispatchQueue.main.async {
-                if repoURL.isEmpty {
-                    repoURL = url
+                detectedRepoSlug = slug
+                detectedRepoURL = repoURL
+                detectedHead = head
+
+                var allItems: [CloudWorkspaceItem] = []
+                allItems.append(contentsOf: prs)
+
+                // Put HEAD branch first, then others
+                var sortedBranches = branches
+                if let head, let idx = sortedBranches.firstIndex(of: head) {
+                    sortedBranches.remove(at: idx)
+                    sortedBranches.insert(head, at: 0)
                 }
+                allItems.append(contentsOf: sortedBranches.map { .branch(name: $0) })
+                allItems.append(.createBranch)
+
+                items = allItems
+                isLoading = false
             }
         }
     }
 
-    private func resolvePR() {
-        let identifier = prIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !identifier.isEmpty else { return }
-        let parsed = Self.parsePRIdentifier(identifier)
-        guard let number = parsed.number, let slug = parsed.repoSlug else { return }
+    // MARK: - Git/GH Operations
 
-        isResolving = true
-        resolvedPRBranch = nil
-        resolvedPRRepoSlug = slug
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Self.ghPRView(number: number, repoSlug: slug)
-            DispatchQueue.main.async {
-                isResolving = false
-                if let branch = result.branch {
-                    resolvedPRBranch = branch
-                }
-                if let repoURLFromPR = result.repoURL, repoURL.isEmpty {
-                    repoURL = repoURLFromPR
-                }
-            }
-        }
+    private static func detectHead(directory: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["rev-parse", "--abbrev-ref", "HEAD"]
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run(); process.waitUntilExit() } catch { return nil }
+        guard process.terminationStatus == 0 else { return nil }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return output?.isEmpty == false ? output : nil
     }
 
-    // MARK: - PR Parsing
-
-    struct ParsedPR {
-        var repoSlug: String?
-        var number: Int?
+    private static func fetchBranches(directory: String) -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["branch", "--format=%(refname:short)", "--sort=-committerdate"]
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run(); process.waitUntilExit() } catch { return [] }
+        guard process.terminationStatus == 0 else { return [] }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
-    static func parsePRIdentifier(_ identifier: String) -> ParsedPR {
-        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // URL form: https://github.com/owner/repo/pull/123
-        if trimmed.contains("github.com") {
-            let parts = trimmed.components(separatedBy: "/")
-            if let pullIndex = parts.firstIndex(of: "pull"),
-               pullIndex + 1 < parts.count,
-               let number = Int(parts[pullIndex + 1]),
-               pullIndex >= 2 {
-                let owner = parts[pullIndex - 2]
-                let repo = parts[pullIndex - 1]
-                return ParsedPR(repoSlug: "\(owner)/\(repo)", number: number)
-            }
-        }
-
-        // Shorthand: owner/repo#123
-        if let hashIndex = trimmed.firstIndex(of: "#") {
-            let slug = String(trimmed[trimmed.startIndex..<hashIndex])
-            let numStr = String(trimmed[trimmed.index(after: hashIndex)...])
-            if !slug.isEmpty, let number = Int(numStr) {
-                return ParsedPR(repoSlug: slug, number: number)
-            }
-        }
-
-        return ParsedPR()
-    }
-
-    private static func ghPRView(number: Int, repoSlug: String) -> (branch: String?, repoURL: String?) {
-        guard let ghPath = Self.resolvedGHPath() else { return (nil, nil) }
-
+    private static func fetchOpenPRs(repoSlug: String) -> [CloudWorkspaceItem] {
+        guard let ghPath = resolvedGHPath() else { return [] }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ghPath)
         process.arguments = [
-            "pr", "view", String(number),
+            "pr", "list",
             "--repo", repoSlug,
-            "--json", "headRefName,headRepository",
+            "--state", "open",
+            "--limit", "20",
+            "--json", "number,title,headRefName",
         ]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return (nil, nil)
-        }
-        guard process.terminationStatus == 0 else { return (nil, nil) }
-
+        do { try process.run(); process.waitUntilExit() } catch { return [] }
+        guard process.terminationStatus == 0 else { return [] }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return (nil, nil)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return json.compactMap { item in
+            guard let number = item["number"] as? Int,
+                  let title = item["title"] as? String,
+                  let branch = item["headRefName"] as? String else { return nil }
+            return CloudWorkspaceItem.pr(number: number, title: title, branch: branch, repoSlug: repoSlug)
         }
-        let branch = json["headRefName"] as? String
-        var repoURL: String?
-        if let headRepo = json["headRepository"] as? [String: Any],
-           let name = headRepo["name"] as? String,
-           let owner = headRepo["owner"] as? [String: Any],
-           let login = owner["login"] as? String {
-            repoURL = "https://github.com/\(login)/\(name).git"
-        }
-        return (branch, repoURL)
     }
-}
 
-// MARK: - Helper: resolvedGHPath
-
-extension NewCloudWorkspaceSheet {
-    /// Resolves the path to the `gh` CLI using GitHubService's path resolution.
     static func resolvedGHPath() -> String? {
         GitHubService.resolvedCommandPath(executable: "gh")
     }
