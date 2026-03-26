@@ -375,19 +375,36 @@ struct WorkspaceContentView: View {
             )
         }
 
-        Group {
-            if isMinimalMode {
-                bonsplitView
-                    .ignoresSafeArea(.container, edges: .top)
-                    .overlay(alignment: .top) {
-                        if isWorkspaceInputActive {
-                            TitlebarDoubleClickMonitorView()
-                                .frame(height: WorkspaceTitlebarInteractionMetrics.minimalModeTopStripHeight)
+        ZStack {
+            Group {
+                if isMinimalMode {
+                    bonsplitView
+                        .ignoresSafeArea(.container, edges: .top)
+                        .overlay(alignment: .top) {
+                            if isWorkspaceInputActive {
+                                TitlebarDoubleClickMonitorView()
+                                    .frame(height: WorkspaceTitlebarInteractionMetrics.minimalModeTopStripHeight)
+                            }
                         }
-                    }
-            } else {
-                bonsplitView
+                } else {
+                    bonsplitView
+                }
             }
+
+            if shouldShowProvisioningOverlay {
+                CloudProvisioningOverlay(workspace: workspace)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private var shouldShowProvisioningOverlay: Bool {
+        guard workspace.cloudConfiguration != nil else { return false }
+        switch workspace.cloudMachineState {
+        case .creating, .starting, .waitingForSSH, .cloningRepository, .error:
+            return true
+        default:
+            return false
         }
     }
 

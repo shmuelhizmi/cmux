@@ -21,11 +21,10 @@ enum CloudWorkspaceCreationMode: Int, CaseIterable, Identifiable {
 // MARK: - Sheet
 
 struct NewCloudWorkspaceSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
     var currentDirectory: String?
     var onSubmit: (FlyCloudConfiguration, String?) -> Void
     var onLocalWorkspace: () -> Void
+    var onDismiss: (() -> Void)?
 
     @State private var mode: CloudWorkspaceCreationMode = .importBranch
     @State private var repoURL: String = ""
@@ -88,7 +87,7 @@ struct NewCloudWorkspaceSheet: View {
 
             HStack {
                 Button(String(localized: "cloud.sheet.cancel", defaultValue: "Cancel")) {
-                    dismiss()
+                    onDismiss?()
                 }
                 .keyboardShortcut(.cancelAction)
 
@@ -104,7 +103,6 @@ struct NewCloudWorkspaceSheet: View {
             Divider()
 
             Button(String(localized: "cloud.sheet.localWorkspace", defaultValue: "or create a local workspace")) {
-                dismiss()
                 onLocalWorkspace()
             }
             .buttonStyle(.plain)
@@ -112,8 +110,7 @@ struct NewCloudWorkspaceSheet: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(20)
-        .frame(width: 520)
+        .padding(24)
         .accessibilityIdentifier("NewCloudWorkspaceSheet")
         .onAppear {
             autoDetectRepo()
@@ -259,7 +256,6 @@ struct NewCloudWorkspaceSheet: View {
             workspaceLabel: workspaceLabel
         )
 
-        dismiss()
         onSubmit(config, workspaceLabel)
     }
 
