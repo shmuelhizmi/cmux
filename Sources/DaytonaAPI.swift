@@ -52,8 +52,10 @@ struct DaytonaAPI: Sendable {
     // MARK: - SSH Access
 
     func createSSHAccess(sandboxId: String, expiresInMinutes: Int = 60) async throws -> DaytonaSSHAccess {
-        let body = DaytonaSSHAccessRequest(expiresInMinutes: expiresInMinutes)
-        return try await post(path: "/sandbox/\(sandboxId)/ssh-access", body: body)
+        try await post(
+            path: "/sandbox/\(sandboxId)/ssh-access",
+            queryItems: [URLQueryItem(name: "expiresInMinutes", value: String(expiresInMinutes))]
+        )
     }
 
     func revokeSSHAccess(sandboxId: String) async throws {
@@ -94,8 +96,15 @@ struct DaytonaAPI: Sendable {
         return try Self.decodeResponse(T.self, from: data, path: path, method: "POST")
     }
 
-    private func post<T: Decodable>(path: String) async throws -> T {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+    private func post<T: Decodable>(
+        path: String,
+        queryItems: [URLQueryItem]? = nil
+    ) async throws -> T {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: true)!
+        if let queryItems, !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -139,13 +148,13 @@ struct DaytonaAPI: Sendable {
 
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
+        // Daytona API uses camelCase JSON keys
         return d
     }()
 
     private static let encoder: JSONEncoder = {
         let e = JSONEncoder()
-        e.keyEncodingStrategy = .convertToSnakeCase
+        // Daytona API uses camelCase JSON keys
         return e
     }()
 }
@@ -171,6 +180,9 @@ enum DaytonaAPIError: LocalizedError {
 
 // MARK: - Request Models
 
+/// Request body for `POST /sandbox`.
+/// When `snapshot` is set, resource fields (`cpu`, `memory`, `disk`) are omitted
+/// because snapshots define their own resources.
 struct DaytonaSandboxCreateRequest: Encodable {
     let cpu: Int?
     let memory: Int?
@@ -180,11 +192,28 @@ struct DaytonaSandboxCreateRequest: Encodable {
     let snapshot: String?
     let language: String?
     let region: String?
-    let autoStopInterval: Int?
-}
+    let autostopTimeoutMinutes: Int?
 
-struct DaytonaSSHAccessRequest: Encodable {
-    let expiresInMinutes: Int
+    private enum CodingKeys: String, CodingKey {
+        case cpu, memory, disk, env, labels, snapshot, language, region
+        case autostopTimeoutMinutes
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(env, forKey: .env)
+        try container.encodeIfPresent(labels, forKey: .labels)
+        try container.encodeIfPresent(snapshot, forKey: .snapshot)
+        try container.encodeIfPresent(language, forKey: .language)
+        try container.encodeIfPresent(region, forKey: .region)
+        try container.encodeIfPresent(autostopTimeoutMinutes, forKey: .autostopTimeoutMinutes)
+        // Only include resource fields when NOT using a snapshot
+        if snapshot == nil {
+            try container.encodeIfPresent(cpu, forKey: .cpu)
+            try container.encodeIfPresent(memory, forKey: .memory)
+            try container.encodeIfPresent(disk, forKey: .disk)
+        }
+    }
 }
 
 // MARK: - Response Models

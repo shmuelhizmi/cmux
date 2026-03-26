@@ -137,7 +137,7 @@ final class DaytonaSandboxController {
             snapshot: spec.snapshot,
             language: spec.language,
             region: spec.region,
-            autoStopInterval: configuration.autoStopInterval
+            autostopTimeoutMinutes: configuration.autoStopInterval
         )
         return try await api.createSandbox(request: request)
     }

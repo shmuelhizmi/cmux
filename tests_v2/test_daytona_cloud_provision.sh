@@ -51,7 +51,7 @@ echo "=== Test 1: Create sandbox ==="
 CREATE_RESPONSE=$(curl -sS -X POST \
     -H "Authorization: Bearer $DAYTONA_API_KEY" \
     -H "Content-Type: application/json" \
-    -d '{"cpu": 1, "memory": 1, "disk": 10, "labels": {"cmux_test": "true"}}' \
+    -d '{"snapshot": "daytona-small", "labels": {"cmux_test": "true"}}' \
     "$API_BASE/sandbox")
 
 SANDBOX_ID=$(echo "$CREATE_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
@@ -103,9 +103,7 @@ echo "=== Test 3: Create SSH access ==="
 
 SSH_RESPONSE=$(curl -sS -X POST \
     -H "Authorization: Bearer $DAYTONA_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d '{"expiresInMinutes": 60}' \
-    "$API_BASE/sandbox/$SANDBOX_ID/ssh-access")
+    "$API_BASE/sandbox/$SANDBOX_ID/ssh-access?expiresInMinutes=60")
 
 SSH_TOKEN=$(echo "$SSH_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['token'])" 2>/dev/null || true)
 
