@@ -1612,6 +1612,7 @@ struct ContentView: View {
     @State private var commandPaletteResultsRevision: UInt64 = 0
     @State private var commandPaletteUsageHistoryByCommandId: [String: CommandPaletteUsageEntry] = [:]
     @State private var isFeedbackComposerPresented = false
+    @State private var isNewCloudWorkspacePresented = false
     @AppStorage(CommandPaletteRenameSelectionSettings.selectAllOnFocusKey)
     private var commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
     @AppStorage(CommandPaletteSwitcherSearchSettings.searchAllSurfacesKey)
@@ -3009,6 +3010,17 @@ struct ContentView: View {
             presentFeedbackComposer()
         })
 
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .newCloudWorkspaceRequested)) { notification in
+            let requestedWindow = notification.object as? NSWindow
+            guard Self.shouldHandleCommandPaletteRequest(
+                observedWindow: observedWindow,
+                requestedWindow: requestedWindow,
+                keyWindow: NSApp.keyWindow,
+                mainWindow: NSApp.mainWindow
+            ) else { return }
+            isNewCloudWorkspacePresented = true
+        })
+
         view = AnyView(view.background(WindowAccessor(dedupeByWindow: false) { window in
             MainActor.assumeIsolated {
                 let tmuxOverlayController = tmuxWorkspacePaneWindowOverlayController(for: window)
@@ -3092,6 +3104,18 @@ struct ContentView: View {
         view = AnyView(view.ignoresSafeArea())
         view = AnyView(view.sheet(isPresented: $isFeedbackComposerPresented) {
             SidebarFeedbackComposerSheet()
+        })
+
+        view = AnyView(view.sheet(isPresented: $isNewCloudWorkspacePresented) {
+            NewCloudWorkspaceSheet(
+                currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
+                onSubmit: { cloudConfig, label in
+                    provisionCloudWorkspace(config: cloudConfig, label: label)
+                },
+                onLocalWorkspace: {
+                    tabManager.addWorkspace()
+                }
+            )
         })
 
         view = AnyView(view.onDisappear {
@@ -6749,6 +6773,27 @@ struct ContentView: View {
         DispatchQueue.main.async {
             isFeedbackComposerPresented = true
         }
+    }
+
+    private func provisionCloudWorkspace(config: FlyCloudConfiguration, label: String?) {
+        guard let token = FlyAuthTokenStore.token() else { return }
+        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else { return }
+
+        let workspace = tabManager.addWorkspace(select: true)
+        if let label, !label.isEmpty {
+            workspace.setCustomTitle(label)
+        }
+        workspace.cloudConfiguration = config
+        workspace.cloudMachineState = .creating
+
+        let controller = FlyMachineController(
+            workspace: workspace,
+            configuration: config,
+            apiToken: token,
+            sshPublicKey: sshPublicKey
+        )
+        workspace.flyMachineController = controller
+        controller.start()
     }
 
     static func shouldHandleCommandPaletteRequest(
