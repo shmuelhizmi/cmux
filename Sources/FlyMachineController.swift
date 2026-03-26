@@ -203,7 +203,7 @@ final class FlyMachineController {
 
     private func resolveOrCreateVolume(name: String, region: String, sizeGB: Int) async throws -> String {
         let volumes = try await api.listVolumes(app: configuration.appName)
-        if let existing = volumes.first(where: { $0.name == name && $0.attachedMachineId == nil }) {
+        if let existing = volumes.first(where: { $0.name == name && $0.attachedMachineId == nil && $0.attachedAllocId == nil }) {
             return existing.id
         }
         let volume = try await api.createVolume(

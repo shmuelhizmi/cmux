@@ -236,8 +236,8 @@ struct FlyVolumeCreateRequest: Encodable {
 struct FlyMachine: Decodable {
     let id: String
     let name: String?
-    let state: String
-    let region: String
+    let state: String?
+    let region: String?
     let privateIp: String?
     let config: Config?
 
@@ -255,12 +255,17 @@ struct FlyMachine: Decodable {
 
 struct FlyVolume: Decodable {
     let id: String
-    let name: String
-    let state: String
-    let region: String
-    let sizeGb: Int
+    let name: String?
+    let state: String?
+    let region: String?
+    let sizeGb: Int?
     let attachedMachineId: String?
+    let attachedAllocId: String?
 }
 
 /// Used for endpoints that return 200 with empty or minimal body.
-private struct FlyEmptyResponse: Decodable {}
+private struct FlyEmptyResponse: Decodable {
+    init(from decoder: Decoder) throws {
+        // Accept any JSON (or empty body)
+    }
+}
