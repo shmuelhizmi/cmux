@@ -3559,52 +3559,47 @@ struct ContentView: View {
     }
 
     private var newCloudWorkspaceOverlay: some View {
-        GeometryReader { proxy in
-            let maxAllowedWidth = max(400, proxy.size.width - 260)
-            let targetWidth = min(520, maxAllowedWidth)
-
-            ZStack(alignment: .center) {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            isNewCloudWorkspacePresented = false
-                        }
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isNewCloudWorkspacePresented = false
                     }
+                }
 
-                NewCloudWorkspaceSheet(
-                    currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
-                    onSubmit: { cloudConfig, label in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            isNewCloudWorkspacePresented = false
-                        }
-                        provisionCloudWorkspace(config: cloudConfig, label: label)
-                    },
-                    onLocalWorkspace: {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            isNewCloudWorkspacePresented = false
-                        }
-                        tabManager.addWorkspace()
-                    },
-                    onDismiss: {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            isNewCloudWorkspacePresented = false
-                        }
+            NewCloudWorkspaceSheet(
+                currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
+                onSubmit: { cloudConfig, label in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isNewCloudWorkspacePresented = false
                     }
-                )
-                .frame(width: targetWidth)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.98))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 8)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    provisionCloudWorkspace(config: cloudConfig, label: label)
+                },
+                onLocalWorkspace: {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isNewCloudWorkspacePresented = false
+                    }
+                    tabManager.addWorkspace()
+                },
+                onDismiss: {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isNewCloudWorkspacePresented = false
+                    }
+                }
+            )
+            .frame(width: 520)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.98))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 8)
         }
         .onExitCommand {
             withAnimation(.easeOut(duration: 0.15)) {
