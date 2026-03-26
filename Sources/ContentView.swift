@@ -3676,6 +3676,9 @@ struct ContentView: View {
     }
 
     private func dismissCloudWorkspaceModal() {
+#if DEBUG
+        dlog("cloud.modal.dismiss")
+#endif
         isNewCloudWorkspacePresented = false
     }
 
@@ -3685,19 +3688,33 @@ struct ContentView: View {
         Color.black.opacity(0.3)
             .ignoresSafeArea()
             .contentShape(Rectangle())
-            .onTapGesture { dismissCloudWorkspaceModal() }
+            .onTapGesture {
+#if DEBUG
+                dlog("cloud.modal.backdrop.tap -> dismiss")
+#endif
+                dismissCloudWorkspaceModal()
+            }
             .overlay {
                 NewCloudWorkspaceSheet(
                     currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
                     onSubmit: { cloudConfig, label in
+#if DEBUG
+                        dlog("cloud.modal.onSubmit label=\(label ?? "nil") app=\(cloudConfig.appName)")
+#endif
                         dismissCloudWorkspaceModal()
                         provisionCloudWorkspace(config: cloudConfig, label: label)
                     },
                     onLocalWorkspace: {
+#if DEBUG
+                        dlog("cloud.modal.onLocalWorkspace")
+#endif
                         dismissCloudWorkspaceModal()
                         tabManager.addWorkspace()
                     },
                     onDismiss: {
+#if DEBUG
+                        dlog("cloud.modal.onDismiss callback")
+#endif
                         dismissCloudWorkspaceModal()
                     }
                 )
@@ -6931,8 +6948,21 @@ struct ContentView: View {
     }
 
     private func provisionCloudWorkspace(config: FlyCloudConfiguration, label: String?) {
-        guard let token = FlyAuthTokenStore.token() else { return }
-        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else { return }
+#if DEBUG
+        dlog("cloud.modal.provision label=\(label ?? "nil") app=\(config.appName)")
+#endif
+        guard let token = FlyAuthTokenStore.token() else {
+#if DEBUG
+            dlog("cloud.modal.provision FAIL: no fly.io API token")
+#endif
+            return
+        }
+        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else {
+#if DEBUG
+            dlog("cloud.modal.provision FAIL: no SSH public key")
+#endif
+            return
+        }
 
         let workspace = tabManager.addWorkspace(select: true)
         if let label, !label.isEmpty {

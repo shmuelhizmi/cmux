@@ -1,4 +1,7 @@
 import SwiftUI
+#if DEBUG
+import Bonsplit
+#endif
 
 // MARK: - Item Model
 
@@ -214,9 +217,15 @@ struct NewCloudWorkspaceSheet: View {
                 if !items.isEmpty { selectedIndex = max(selectedIndex - 1, 0) }
                 return nil
             case Self.kVKReturn, Self.kVKKeypadEnter:
+#if DEBUG
+                dlog("cloud.modal.keyMonitor ENTER -> selectCurrentItem")
+#endif
                 selectCurrentItem()
                 return nil
             case Self.kVKEscape:
+#if DEBUG
+                dlog("cloud.modal.keyMonitor ESC -> dismiss")
+#endif
                 onDismiss?()
                 return nil
             default:
@@ -343,11 +352,22 @@ struct NewCloudWorkspaceSheet: View {
 
     private func selectCurrentItem() {
         let items = filteredItems
-        guard selectedIndex >= 0, selectedIndex < items.count else { return }
+#if DEBUG
+        dlog("cloud.modal.selectCurrentItem index=\(selectedIndex) count=\(items.count)")
+#endif
+        guard selectedIndex >= 0, selectedIndex < items.count else {
+#if DEBUG
+            dlog("cloud.modal.selectCurrentItem SKIP: index out of range")
+#endif
+            return
+        }
         selectItem(items[selectedIndex])
     }
 
     private func selectItem(_ item: CloudWorkspaceItem) {
+#if DEBUG
+        dlog("cloud.modal.selectItem id=\(item.id)")
+#endif
         switch item {
         case .pr(let number, let title, _, let slug):
             submitPR(number: number, title: title, repoSlug: slug)
@@ -359,21 +379,43 @@ struct NewCloudWorkspaceSheet: View {
     }
 
     private func submitBranch(name: String) {
-        guard let repoURL = effectiveRepoURL() else { return }
+#if DEBUG
+        dlog("cloud.modal.submitBranch name=\(name) repoSlug=\(detectedRepoSlug ?? "nil") repoURL=\(detectedRepoURL ?? "nil")")
+#endif
+        guard let repoURL = effectiveRepoURL() else {
+#if DEBUG
+            dlog("cloud.modal.submitBranch FAIL: no repo URL")
+#endif
+            return
+        }
         let script = FlyCloudConfiguration.buildGitSetupScript(
             mode: "import_branch", repoURL: repoURL, branchName: name
         )
         let config = buildConfig(gitSetupScript: script)
+#if DEBUG
+        dlog("cloud.modal.submitBranch calling onSubmit appName=\(config.appName)")
+#endif
         onSubmit(config, name)
     }
 
     private func submitPR(number: Int, title: String, repoSlug: String) {
-        guard let repoURL = effectiveRepoURL() else { return }
+#if DEBUG
+        dlog("cloud.modal.submitPR number=\(number) slug=\(repoSlug) repoURL=\(detectedRepoURL ?? "nil")")
+#endif
+        guard let repoURL = effectiveRepoURL() else {
+#if DEBUG
+            dlog("cloud.modal.submitPR FAIL: no repo URL")
+#endif
+            return
+        }
         let script = FlyCloudConfiguration.buildGitSetupScript(
             mode: "import_pr", repoURL: repoURL, prNumber: number, repoSlug: repoSlug
         )
         let label = "#\(number) \(title)"
         let config = buildConfig(gitSetupScript: script)
+#if DEBUG
+        dlog("cloud.modal.submitPR calling onSubmit appName=\(config.appName)")
+#endif
         onSubmit(config, label)
     }
 
