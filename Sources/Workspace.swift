@@ -1485,7 +1485,10 @@ private final class WorkspaceRemoteDaemonRPCClient {
             args += ["-o", "StrictHostKeyChecking=accept-new"]
         }
         if batchMode {
-            args += ["-o", "BatchMode=yes"]
+            // Allow config to override BatchMode (e.g. for SSH proxies that need keyboard-interactive).
+            if !hasSSHOptionKey(effectiveSSHOptions, key: "BatchMode") {
+                args += ["-o", "BatchMode=yes"]
+            }
             // Batch helpers should reuse an existing ControlPath if one was configured,
             // but must never try to negotiate a new master connection.
             args += ["-o", "ControlMaster=no"]
@@ -3708,7 +3711,10 @@ final class WorkspaceRemoteSessionController {
             args += ["-o", "StrictHostKeyChecking=accept-new"]
         }
         if batchMode {
-            args += ["-o", "BatchMode=yes"]
+            // Allow config to override BatchMode (e.g. for SSH proxies that need keyboard-interactive).
+            if !hasSSHOptionKey(effectiveSSHOptions, key: "BatchMode") {
+                args += ["-o", "BatchMode=yes"]
+            }
             args += ["-o", "ControlMaster=no"]
         }
         if let port = configuration.port {
