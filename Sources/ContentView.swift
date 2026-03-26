@@ -934,6 +934,7 @@ final class FileDropOverlayView: NSView {
 
 var fileDropOverlayKey: UInt8 = 0
 private var commandPaletteWindowOverlayKey: UInt8 = 0
+private var cloudWorkspaceModalWindowOverlayKey: UInt8 = 0
 private var tmuxWorkspacePaneWindowOverlayKey: UInt8 = 0
 let commandPaletteOverlayContainerIdentifier = NSUserInterfaceItemIdentifier("cmux.commandPalette.overlay.container")
 let tmuxWorkspacePaneOverlayContainerIdentifier = NSUserInterfaceItemIdentifier("cmux.tmuxWorkspacePane.overlay.container")
@@ -1279,6 +1280,16 @@ private func commandPaletteWindowOverlayController(for window: NSWindow) -> Wind
     }
     let controller = WindowCommandPaletteOverlayController(window: window)
     objc_setAssociatedObject(window, &commandPaletteWindowOverlayKey, controller, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    return controller
+}
+
+@MainActor
+private func cloudWorkspaceModalOverlayController(for window: NSWindow) -> WindowCommandPaletteOverlayController {
+    if let existing = objc_getAssociatedObject(window, &cloudWorkspaceModalWindowOverlayKey) as? WindowCommandPaletteOverlayController {
+        return existing
+    }
+    let controller = WindowCommandPaletteOverlayController(window: window)
+    objc_setAssociatedObject(window, &cloudWorkspaceModalWindowOverlayKey, controller, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     return controller
 }
 
@@ -3027,6 +3038,8 @@ struct ContentView: View {
                 tmuxOverlayController.update(state: tmuxWorkspacePaneWindowOverlayState(for: window))
                 let overlayController = commandPaletteWindowOverlayController(for: window)
                 overlayController.update(rootView: AnyView(commandPaletteOverlay), isVisible: isCommandPalettePresented)
+                let cloudModalController = cloudWorkspaceModalOverlayController(for: window)
+                cloudModalController.update(rootView: AnyView(newCloudWorkspaceOverlay), isVisible: isNewCloudWorkspacePresented)
             }
         }))
 
@@ -3106,14 +3119,9 @@ struct ContentView: View {
             SidebarFeedbackComposerSheet()
         })
 
-        if isNewCloudWorkspacePresented {
-            view = AnyView(
-                ZStack {
-                    view
-                    newCloudWorkspaceOverlay
-                }
-            )
-        }
+        // Cloud workspace modal is driven via the AppKit overlay controller
+        // (cloudWorkspaceModalOverlayController) in the WindowAccessor callback above,
+        // which ensures it renders above AppKit-hosted terminal portal views.
 
         view = AnyView(view.onDisappear {
             if isResizerDragging {
