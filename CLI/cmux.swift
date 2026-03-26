@@ -1690,6 +1690,8 @@ struct CMUXCLI {
             try runCloudDestroy(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
         case "cloud-status":
             try runCloudStatus(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
+        case "cloud-configure-token":
+            try runCloudConfigureToken(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
 
         case "new-workspace":
             let (commandOpt, rem0) = parseOption(commandArgs, name: "--command")
@@ -4462,6 +4464,23 @@ struct CMUXCLI {
         }
     }
 
+    private func runCloudConfigureToken(commandArgs: [String], client: SocketClient, jsonOutput: Bool) throws {
+        // Accept token as first positional arg or via --token flag
+        let tokenFromFlag = optionValue(commandArgs, name: "--token")
+        let tokenPositional = commandArgs.first(where: { !$0.hasPrefix("--") })
+        guard let token = tokenFromFlag ?? tokenPositional, !token.isEmpty else {
+            throw CLIError(message: "cloud-configure-token: missing API key. Usage: cmux cloud-configure-token <key>")
+        }
+        let result = try client.sendV2(method: "workspace.cloud.configure_token", params: [
+            "token": token,
+        ])
+        if jsonOutput {
+            print(jsonString(result))
+        } else {
+            print("Daytona API key stored in Keychain.")
+        }
+    }
+
     private func runRemoteDaemonStatus(commandArgs: [String], jsonOutput: Bool) throws {
         let requestedOS = optionValue(commandArgs, name: "--os")?.trimmingCharacters(in: .whitespacesAndNewlines)
         let requestedArch = optionValue(commandArgs, name: "--arch")?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6573,6 +6592,16 @@ struct CMUXCLI {
 
             Flags:
               --workspace <id>   Target workspace (default: current)
+            """
+        case "cloud-configure-token":
+            return """
+            Usage: cmux cloud-configure-token <api-key>
+
+            Store a Daytona API key in the macOS Keychain for cloud workspace provisioning.
+            The key is also read from the DAYTONA_API_KEY environment variable.
+
+            Example:
+              cmux cloud-configure-token dtn_xxxxxxxxxxxx
             """
         case "remote-daemon-status":
             return """
