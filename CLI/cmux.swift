@@ -1682,6 +1682,15 @@ struct CMUXCLI {
         case "ssh-session-end":
             try runSSHSessionEnd(commandArgs: commandArgs, client: client)
 
+        case "cloud":
+            try runCloud(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat)
+        case "cloud-stop":
+            try runCloudStop(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
+        case "cloud-destroy":
+            try runCloudDestroy(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
+        case "cloud-status":
+            try runCloudStatus(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
+
         case "new-workspace":
             let (commandOpt, rem0) = parseOption(commandArgs, name: "--command")
             let (cwdOpt, remaining) = parseOption(rem0, name: "--cwd")
@@ -4319,6 +4328,151 @@ struct CMUXCLI {
         ])
     }
 
+    // MARK: - Cloud (fly.io) Commands
+
+    private func runCloud(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat
+    ) throws {
+        let (appOpt, rem0) = parseOption(commandArgs, name: "--app")
+        let (imageOpt, rem1) = parseOption(rem0, name: "--image")
+        let (cpusOpt, rem2) = parseOption(rem1, name: "--cpus")
+        let (memoryOpt, rem3) = parseOption(rem2, name: "--memory")
+        let (cpuKindOpt, rem4) = parseOption(rem3, name: "--cpu-kind")
+        let (regionOpt, rem5) = parseOption(rem4, name: "--region")
+        let (volumeOpt, rem6) = parseOption(rem5, name: "--volume")
+        let (volumeSizeOpt, rem7) = parseOption(rem6, name: "--volume-size")
+        let (nameOpt, rem8) = parseOption(rem7, name: "--name")
+        let (userOpt, rem9) = parseOption(rem8, name: "--user")
+        let (machineOpt, rem10) = parseOption(rem9, name: "--machine")
+        let (tokenOpt, remaining) = parseOption(rem10, name: "--token")
+
+        if let unknown = remaining.first(where: { $0.hasPrefix("--") }) {
+            throw CLIError(message: "cloud: unknown flag '\(unknown)'. Run 'cmux cloud --help' for usage.")
+        }
+
+        let appName = appOpt ?? ProcessInfo.processInfo.environment["FLY_APP"]
+        guard let appName, !appName.isEmpty else {
+            throw CLIError(message: "cloud: --app is required (or set FLY_APP environment variable)")
+        }
+
+        // Create workspace
+        let workspaceCreate = try client.sendV2(method: "workspace.create", params: [:])
+        guard let workspaceId = workspaceCreate["workspace_id"] as? String, !workspaceId.isEmpty else {
+            throw CLIError(message: "workspace.create did not return workspace_id")
+        }
+
+        // Rename if requested
+        if let nameOpt, !nameOpt.isEmpty {
+            _ = try client.sendV2(method: "workspace.rename", params: [
+                "workspace_id": workspaceId,
+                "title": nameOpt,
+            ])
+        }
+
+        // Provision cloud machine
+        var provisionParams: [String: Any] = [
+            "workspace_id": workspaceId,
+            "app_name": appName,
+        ]
+        if let imageOpt { provisionParams["image"] = imageOpt }
+        if let cpusOpt, let cpus = Int(cpusOpt) { provisionParams["cpus"] = cpus }
+        if let memoryOpt, let mem = Int(memoryOpt) { provisionParams["memory_mb"] = mem }
+        if let cpuKindOpt { provisionParams["cpu_kind"] = cpuKindOpt }
+        if let regionOpt { provisionParams["region"] = regionOpt }
+        if let volumeOpt { provisionParams["volume_name"] = volumeOpt }
+        if let volumeSizeOpt, let size = Int(volumeSizeOpt) { provisionParams["volume_size_gb"] = size }
+        if let userOpt { provisionParams["ssh_user"] = userOpt }
+        if let machineOpt { provisionParams["machine_id"] = machineOpt }
+        if let tokenOpt { provisionParams["token"] = tokenOpt }
+
+        let provision = try client.sendV2(method: "workspace.cloud.provision", params: provisionParams)
+
+        // Select the workspace
+        _ = try client.sendV2(method: "workspace.select", params: [
+            "workspace_id": workspaceId,
+        ])
+
+        if jsonOutput {
+            print(jsonString(provision))
+        } else {
+            print("Cloud workspace created: \(workspaceId)")
+            if let cloud = provision["cloud"] as? [String: Any],
+               let state = cloud["state"] as? String {
+                print("Machine state: \(state)")
+                if let machineId = cloud["machine_id"] as? String {
+                    print("Machine ID: \(machineId)")
+                }
+            }
+        }
+    }
+
+    private func runCloudStop(commandArgs: [String], client: SocketClient, jsonOutput: Bool) throws {
+        let workspaceRaw = optionValue(commandArgs, name: "--workspace") ?? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"]
+        guard let workspaceRaw, !workspaceRaw.isEmpty else {
+            throw CLIError(message: "cloud-stop: --workspace is required (or set CMUX_WORKSPACE_ID)")
+        }
+        guard let workspaceId = try normalizeWorkspaceHandle(workspaceRaw, client: client) else {
+            throw CLIError(message: "cloud-stop: could not resolve workspace '\(workspaceRaw)'")
+        }
+        let result = try client.sendV2(method: "workspace.cloud.stop", params: [
+            "workspace_id": workspaceId,
+        ])
+        if jsonOutput {
+            print(jsonString(result))
+        } else {
+            print("Cloud machine stopped.")
+        }
+    }
+
+    private func runCloudDestroy(commandArgs: [String], client: SocketClient, jsonOutput: Bool) throws {
+        let workspaceRaw = optionValue(commandArgs, name: "--workspace") ?? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"]
+        guard let workspaceRaw, !workspaceRaw.isEmpty else {
+            throw CLIError(message: "cloud-destroy: --workspace is required (or set CMUX_WORKSPACE_ID)")
+        }
+        guard let workspaceId = try normalizeWorkspaceHandle(workspaceRaw, client: client) else {
+            throw CLIError(message: "cloud-destroy: could not resolve workspace '\(workspaceRaw)'")
+        }
+        let result = try client.sendV2(method: "workspace.cloud.destroy", params: [
+            "workspace_id": workspaceId,
+        ])
+        if jsonOutput {
+            print(jsonString(result))
+        } else {
+            print("Cloud machine destroyed.")
+        }
+    }
+
+    private func runCloudStatus(commandArgs: [String], client: SocketClient, jsonOutput: Bool) throws {
+        let workspaceRaw = optionValue(commandArgs, name: "--workspace") ?? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"]
+        guard let workspaceRaw, !workspaceRaw.isEmpty else {
+            throw CLIError(message: "cloud-status: --workspace is required (or set CMUX_WORKSPACE_ID)")
+        }
+        guard let workspaceId = try normalizeWorkspaceHandle(workspaceRaw, client: client) else {
+            throw CLIError(message: "cloud-status: could not resolve workspace '\(workspaceRaw)'")
+        }
+        let result = try client.sendV2(method: "workspace.cloud.status", params: [
+            "workspace_id": workspaceId,
+        ])
+        if jsonOutput {
+            print(jsonString(result))
+        } else if let cloud = result["cloud"] as? [String: Any] {
+            let state = cloud["state"] as? String ?? "unknown"
+            let app = cloud["app_name"] as? String ?? "unknown"
+            let image = cloud["image"] as? String ?? "unknown"
+            let machineId = (cloud["machine_id"] as? String) ?? "none"
+            print("App: \(app)")
+            print("Image: \(image)")
+            print("State: \(state)")
+            print("Machine ID: \(machineId)")
+            if let detail = cloud["detail"] as? String {
+                print("Detail: \(detail)")
+            }
+        }
+    }
+
     private func runRemoteDaemonStatus(commandArgs: [String], jsonOutput: Bool) throws {
         let requestedOS = optionValue(commandArgs, name: "--os")?.trimmingCharacters(in: .whitespacesAndNewlines)
         let requestedArch = optionValue(commandArgs, name: "--arch")?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6377,6 +6531,61 @@ struct CMUXCLI {
               cmux ssh dev@my-host
               cmux ssh dev@my-host --name "gpu-box" --port 2222 --identity ~/.ssh/id_ed25519
               cmux ssh dev@my-host --ssh-option UserKnownHostsFile=/dev/null --ssh-option StrictHostKeyChecking=no
+            """
+        case "cloud":
+            return """
+            Usage: cmux cloud [flags]
+
+            Create a new workspace backed by a fly.io machine (dev container).
+            Provisions the machine, waits for SSH access, and connects automatically.
+
+            Flags:
+              --app <name>            Fly.io app name (required, or FLY_APP env)
+              --image <image>         Docker image (default: ubuntu:24.04)
+              --cpus <n>              CPU count (default: 1)
+              --memory <mb>           Memory in MB (default: 1024)
+              --cpu-kind <kind>       CPU kind: shared or performance (default: shared)
+              --region <code>         Fly.io region (default: auto)
+              --volume <name>         Persistent volume name (creates if needed)
+              --volume-size <gb>      Volume size in GB (default: 10, for new volumes)
+              --name <title>          Workspace title
+              --user <name>           SSH user (default: root)
+              --machine <id>          Resume a specific stopped machine
+              --token <token>         Fly.io API token (or FLY_API_TOKEN env)
+
+            Example:
+              cmux cloud --app my-dev --image ubuntu:24.04
+              cmux cloud --app my-dev --machine 3287dd4e965e86
+              cmux cloud --app my-dev --image node:20 --cpus 4 --memory 4096 --volume ws-data
+            """
+        case "cloud-stop":
+            return """
+            Usage: cmux cloud-stop [--workspace <id>]
+
+            Stop the fly.io machine for a cloud workspace. The machine is stopped (not destroyed),
+            preserving its state for fast resume (<1s). Stopped machines cost only volume storage.
+
+            Flags:
+              --workspace <id>   Target workspace (default: current)
+            """
+        case "cloud-destroy":
+            return """
+            Usage: cmux cloud-destroy [--workspace <id>]
+
+            Permanently destroy the fly.io machine for a cloud workspace.
+            This is irreversible — all non-volume data is lost.
+
+            Flags:
+              --workspace <id>   Target workspace (default: current)
+            """
+        case "cloud-status":
+            return """
+            Usage: cmux cloud-status [--workspace <id>]
+
+            Show the status of the fly.io machine for a cloud workspace.
+
+            Flags:
+              --workspace <id>   Target workspace (default: current)
             """
         case "remote-daemon-status":
             return """

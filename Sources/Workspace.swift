@@ -263,7 +263,8 @@ extension Workspace {
             statusEntries: statusSnapshots,
             logEntries: logSnapshots,
             progress: progressSnapshot,
-            gitBranch: gitBranchSnapshot
+            gitBranch: gitBranchSnapshot,
+            cloudConfiguration: cloudConfiguration
         )
     }
 
@@ -311,6 +312,12 @@ extension Workspace {
         }
         progress = snapshot.progress.map { SidebarProgressState(value: $0.value, label: $0.label) }
         gitBranch = snapshot.gitBranch.map { SidebarGitBranchState(branch: $0.branch, isDirty: $0.isDirty) }
+
+        // Restore cloud workspace configuration (machine stays stopped until resumed)
+        if let savedCloudConfig = snapshot.cloudConfiguration {
+            cloudConfiguration = savedCloudConfig
+            cloudMachineState = .stopped
+        }
 
         recomputeListeningPorts()
 
@@ -5527,6 +5534,25 @@ final class Workspace: Identifiable, ObservableObject {
         return formatter
     }()
     nonisolated(unsafe) static var runSSHControlMasterCommandOverrideForTesting: (([String]) -> Void)?
+
+    // MARK: - Fly.io Cloud Machine
+
+    @Published var cloudConfiguration: FlyCloudConfiguration?
+    @Published var cloudMachineState: FlyCloudMachineState = .stopped
+    @Published var cloudMachineDetail: String?
+    var flyMachineController: FlyMachineController?
+
+    func stopCloudMachineIfNeeded() {
+        guard flyMachineController != nil else { return }
+        flyMachineController?.stop()
+        flyMachineController = nil
+    }
+
+    func destroyCloudMachine() {
+        flyMachineController?.destroy()
+        flyMachineController = nil
+    }
+
     private var panelShellActivityStates: [UUID: PanelShellActivityState] = [:]
     /// PIDs associated with agent status entries (e.g. claude_code), keyed by status key.
     /// Used for stale-session detection: if the PID is dead, the status entry is cleared.
@@ -5781,6 +5807,8 @@ final class Workspace: Identifiable, ObservableObject {
     deinit {
         activeRemoteSessionControllerID = nil
         remoteSessionController?.stop()
+        flyMachineController?.stop()
+        flyMachineController = nil
     }
 
     func refreshSplitButtonTooltips() {
