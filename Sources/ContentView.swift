@@ -11457,26 +11457,62 @@ private struct TabItemView: View, Equatable {
 
             // Pull request rows
             if detailVisibility.showsPullRequests, !pullRequestRows.isEmpty {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(pullRequestRows) { pullRequest in
                         Button(action: {
                             openPullRequestLink(pullRequest.url)
                         }) {
-                            HStack(spacing: 4) {
-                                PullRequestStatusIcon(
-                                    status: pullRequest.status,
-                                    color: pullRequestForegroundColor
-                                )
-                                Text("\(pullRequest.label) #\(pullRequest.number)")
-                                    .underline()
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                Text(pullRequestStatusLabel(pullRequest.status, checks: pullRequest.checks))
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
+                            VStack(alignment: .leading, spacing: 1) {
+                                // Line 1: Status icon + PR #N + status + checks count
+                                HStack(spacing: 4) {
+                                    PullRequestStatusIcon(
+                                        status: pullRequest.status,
+                                        color: pullRequestForegroundColor
+                                    )
+                                    Text("\(pullRequest.label) #\(pullRequest.number)")
+                                        .underline()
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    Text(pullRequestStatusLabel(
+                                        pullRequest.status,
+                                        checks: pullRequest.checks,
+                                        checksTotal: pullRequest.checksTotal,
+                                        checksPassed: pullRequest.checksPassed
+                                    ))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    // Diff stats on the right
+                                    if let additions = pullRequest.additions {
+                                        Text("+\(additions)")
+                                            .foregroundColor(diffStatColor(isAddition: true, isActive: isActive))
+                                    }
+                                    if let deletions = pullRequest.deletions {
+                                        Text("-\(deletions)")
+                                            .foregroundColor(diffStatColor(isAddition: false, isActive: isActive))
+                                    }
+                                }
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(pullRequestForegroundColor)
+
+                                // Line 2: PR title (if available)
+                                if let title = pullRequest.title, !title.isEmpty {
+                                    Text(title)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(pullRequestForegroundColor.opacity(0.7))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .padding(.leading, 16)
+                                }
+
+                                // Line 3: Review decision (if available)
+                                if let reviewDecision = pullRequest.reviewDecision {
+                                    Text(reviewDecisionLabel(reviewDecision))
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundColor(reviewDecisionColor(reviewDecision, isActive: isActive))
+                                        .lineLimit(1)
+                                        .padding(.leading, 16)
+                                }
                             }
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(pullRequestForegroundColor)
                         }
                         .buttonStyle(.plain)
                         .safeHelp(String(localized: "sidebar.pullRequest.openTooltip", defaultValue: "Open \(pullRequest.label) #\(pullRequest.number)"))
@@ -12171,6 +12207,12 @@ private struct TabItemView: View, Equatable {
         let url: URL
         let status: SidebarPullRequestStatus
         let checks: SidebarPullRequestChecksStatus?
+        let title: String?
+        let additions: Int?
+        let deletions: Int?
+        let reviewDecision: SidebarPullRequestReviewDecision?
+        let checksTotal: Int?
+        let checksPassed: Int?
     }
 
     private func pullRequestDisplays(orderedPanelIds: [UUID]) -> [PullRequestDisplay] {
@@ -12181,7 +12223,13 @@ private struct TabItemView: View, Equatable {
                 label: pullRequest.label,
                 url: pullRequest.url,
                 status: pullRequest.status,
-                checks: pullRequest.checks
+                checks: pullRequest.checks,
+                title: pullRequest.title,
+                additions: pullRequest.additions,
+                deletions: pullRequest.deletions,
+                reviewDecision: pullRequest.reviewDecision,
+                checksTotal: pullRequest.checksTotal,
+                checksPassed: pullRequest.checksPassed
             )
         }
     }
@@ -12208,13 +12256,58 @@ private struct TabItemView: View, Equatable {
 
     private func pullRequestStatusLabel(
         _ status: SidebarPullRequestStatus,
-        checks _: SidebarPullRequestChecksStatus?
+        checks _: SidebarPullRequestChecksStatus?,
+        checksTotal: Int? = nil,
+        checksPassed: Int? = nil
     ) -> String {
+        let statusText: String
         switch status {
-        case .open: return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
-        case .merged: return String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
-        case .closed: return String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
+        case .open: statusText = String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
+        case .merged: statusText = String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
+        case .closed: statusText = String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
         }
+        if let total = checksTotal, let passed = checksPassed, total > 0 {
+            return "\(statusText) · \(passed)/\(total) checks"
+        }
+        return statusText
+    }
+
+    private func reviewDecisionLabel(_ decision: SidebarPullRequestReviewDecision) -> String {
+        switch decision {
+        case .approved:
+            return String(localized: "sidebar.pullRequest.reviewApproved", defaultValue: "Approved")
+        case .changesRequested:
+            return String(localized: "sidebar.pullRequest.reviewChangesRequested", defaultValue: "Changes requested")
+        case .reviewRequired:
+            return String(localized: "sidebar.pullRequest.reviewRequired", defaultValue: "Review required")
+        case .pending:
+            return String(localized: "sidebar.pullRequest.reviewPending", defaultValue: "Pending review")
+        }
+    }
+
+    private func reviewDecisionColor(_ decision: SidebarPullRequestReviewDecision, isActive: Bool) -> Color {
+        if isActive {
+            switch decision {
+            case .approved:
+                return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.9))
+            case .changesRequested:
+                return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.9))
+            case .reviewRequired, .pending:
+                return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.6))
+            }
+        }
+        switch decision {
+        case .approved: return .green
+        case .changesRequested: return .orange
+        case .reviewRequired, .pending: return .secondary
+        }
+    }
+
+    private func diffStatColor(isAddition: Bool, isActive: Bool) -> Color {
+        if isActive {
+            return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.75))
+        }
+        return isAddition ? .green : .red
     }
 
     private func logLevelIcon(_ level: SidebarLogLevel) -> String {
