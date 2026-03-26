@@ -1,3 +1,4 @@
+import Bonsplit
 import Foundation
 
 /// Manages the lifecycle of a single Daytona sandbox for a cloud workspace.
@@ -86,15 +87,24 @@ final class DaytonaSandboxController {
             // Step 1: Create or start the sandbox
             let sandboxID: String
             if let existingID = configuration.resolvedSandboxID {
+#if DEBUG
+                dlog("daytona.provision startExisting id=\(existingID)")
+#endif
                 workspace.cloudMachineState = .starting
                 try await api.startSandbox(id: existingID)
                 sandboxID = existingID
             } else {
+#if DEBUG
+                dlog("daytona.provision createNew snapshot=\(configuration.sandboxSpec.snapshot ?? "nil")")
+#endif
                 workspace.cloudMachineState = .creating
                 let sandbox = try await createSandbox()
                 sandboxID = sandbox.id
                 configuration.resolvedSandboxID = sandboxID
                 workspace.cloudConfiguration?.resolvedSandboxID = sandboxID
+#if DEBUG
+                dlog("daytona.provision created id=\(sandboxID)")
+#endif
             }
 
             try Task.checkCancellation()
@@ -102,23 +112,40 @@ final class DaytonaSandboxController {
             // Step 2: Poll until the sandbox is running
             workspace.cloudMachineState = .starting
             try await waitForRunning(sandboxID: sandboxID)
+#if DEBUG
+            dlog("daytona.provision sandbox running id=\(sandboxID)")
+#endif
 
             try Task.checkCancellation()
 
             // Step 3: Create SSH access
             workspace.cloudMachineState = .waitingForSSH
             let sshAccess = try await api.createSSHAccess(sandboxId: sandboxID, expiresInMinutes: 60)
+#if DEBUG
+            dlog("daytona.provision sshToken obtained, length=\(sshAccess.token.count)")
+#endif
 
             try Task.checkCancellation()
 
             // Step 4: Hand off to existing remote session infrastructure
             let remoteConfig = buildRemoteConfiguration(sshToken: sshAccess.token)
+#if DEBUG
+            dlog("daytona.provision handoff dest=\(remoteConfig.destination) identity=\(remoteConfig.identityFile ?? "nil") options=\(remoteConfig.sshOptions)")
+#endif
             workspace.configureRemoteConnection(remoteConfig, autoConnect: true)
             workspace.cloudMachineState = .ready
+#if DEBUG
+            dlog("daytona.provision complete")
+#endif
 
         } catch is CancellationError {
-            // Normal cancellation, don't report error
+#if DEBUG
+            dlog("daytona.provision cancelled")
+#endif
         } catch {
+#if DEBUG
+            dlog("daytona.provision error: \(error.localizedDescription)")
+#endif
             workspace.cloudMachineState = .error
             workspace.cloudMachineDetail = error.localizedDescription
         }
@@ -148,6 +175,11 @@ final class DaytonaSandboxController {
         for attempt in 1...maxAttempts {
             try Task.checkCancellation()
             let sandbox = try await api.getSandbox(id: sandboxID)
+#if DEBUG
+            if attempt == 1 || attempt % 5 == 0 {
+                dlog("daytona.poll attempt=\(attempt) state=\(sandbox.state ?? "nil") id=\(sandboxID)")
+            }
+#endif
             if sandbox.state == "running" || sandbox.state == "started" {
                 return
             }
@@ -179,9 +211,12 @@ final class DaytonaSandboxController {
                 "StrictHostKeyChecking=no",
                 "UserKnownHostsFile=/dev/null",
                 "LogLevel=ERROR",
-                // Daytona SSH proxy authenticates via the token embedded in the username.
-                // Offer publickey first (SSH handshake needs it), then fall back to none.
-                "PreferredAuthentications=publickey,none,keyboard-interactive",
+                // Daytona SSH proxy authenticates via the token in the username.
+                // Override BatchMode=yes (set by the remote session controller) so that
+                // keyboard-interactive auth works — Daytona's proxy requires it.
+                "BatchMode=no",
+                "PasswordAuthentication=no",
+                "PreferredAuthentications=publickey,keyboard-interactive,none",
             ],
             localProxyPort: nil,
             relayPort: nil,
