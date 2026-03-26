@@ -1733,6 +1733,7 @@ struct ContentView: View {
     @State private var commandPaletteUsageHistoryByCommandId: [String: CommandPaletteUsageEntry] = [:]
     @State private var isFeedbackComposerPresented = false
     @State private var isNewCloudWorkspacePresented = false
+    @State private var cloudWorkspaceModalError: String?
     @AppStorage(CommandPaletteRenameSelectionSettings.selectAllOnFocusKey)
     private var commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
     @AppStorage(CommandPaletteSwitcherSearchSettings.searchAllSurfacesKey)
@@ -3701,6 +3702,11 @@ struct ContentView: View {
 #if DEBUG
                         dlog("cloud.modal.onSubmit label=\(label ?? "nil") app=\(cloudConfig.appName)")
 #endif
+                        if let error = cloudProvisioningPreconditionError() {
+                            cloudWorkspaceModalError = error
+                            return
+                        }
+                        cloudWorkspaceModalError = nil
                         dismissCloudWorkspaceModal()
                         provisionCloudWorkspace(config: cloudConfig, label: label)
                     },
@@ -3715,8 +3721,10 @@ struct ContentView: View {
 #if DEBUG
                         dlog("cloud.modal.onDismiss callback")
 #endif
+                        cloudWorkspaceModalError = nil
                         dismissCloudWorkspaceModal()
-                    }
+                    },
+                    externalError: cloudWorkspaceModalError
                 )
                 .frame(width: 520)
                 .fixedSize(horizontal: false, vertical: true)
@@ -6945,6 +6953,16 @@ struct ContentView: View {
         DispatchQueue.main.async {
             isFeedbackComposerPresented = true
         }
+    }
+
+    private func cloudProvisioningPreconditionError() -> String? {
+        if FlyAuthTokenStore.token() == nil {
+            return "No fly.io API token configured. Set FLY_API_TOKEN environment variable or run: cmux cloud configure-token"
+        }
+        if FlyMachineController.readDefaultSSHPublicKey() == nil {
+            return "No SSH public key found in ~/.ssh/. Generate one with: ssh-keygen -t ed25519"
+        }
+        return nil
     }
 
     private func provisionCloudWorkspace(config: FlyCloudConfiguration, label: String?) {

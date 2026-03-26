@@ -66,6 +66,7 @@ struct NewCloudWorkspaceSheet: View {
     var onSubmit: (FlyCloudConfiguration, String?) -> Void
     var onLocalWorkspace: () -> Void
     var onDismiss: (() -> Void)?
+    var externalError: String?
 
     @State private var searchText: String = ""
     @State private var items: [CloudWorkspaceItem] = []
@@ -159,6 +160,23 @@ struct NewCloudWorkspaceSheet: View {
                         guard newValue >= 0, newValue < items.count else { return }
                         proxy.scrollTo(items[newValue].id, anchor: .center)
                     }
+                }
+
+                // Error display
+                if let displayError = externalError ?? errorMessage {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red.opacity(0.8))
+                            .font(.system(size: 11))
+                        Text(displayError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red.opacity(0.9))
+                            .textSelection(.enabled)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
                 }
 
                 Divider()

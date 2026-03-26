@@ -9,13 +9,16 @@ enum FlyAuthTokenStore {
     private static let keychainService = "com.cmux.fly-api-token"
     private static let keychainAccount = "fly-api-token"
 
-    /// Returns the fly.io API token, checking Keychain first, then environment.
+    /// Returns the fly.io API token, checking Keychain, environment, then `fly auth token` CLI.
     static func token() -> String? {
         if let stored = loadFromKeychain() {
             return stored
         }
         if let env = ProcessInfo.processInfo.environment["FLY_API_TOKEN"], !env.isEmpty {
             return env
+        }
+        if let cliToken = tokenFromFlyCLI() {
+            return cliToken
         }
         return nil
     }
@@ -65,6 +68,35 @@ enum FlyAuthTokenStore {
         #else
         return nil
         #endif
+    }
+
+    private static func tokenFromFlyCLI() -> String? {
+        let candidates = [
+            "/opt/homebrew/bin/fly",
+            "/usr/local/bin/fly",
+            "/opt/homebrew/bin/flyctl",
+            "/usr/local/bin/flyctl",
+        ]
+        guard let flyPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            return nil
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: flyPath)
+        process.arguments = ["auth", "token"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let output, !output.isEmpty else { return nil }
+        return output
     }
 
     @discardableResult
