@@ -969,6 +969,7 @@ private final class PassthroughWindowOverlayContainerView: NSView {
 
 /// Lightweight overlay controller for modals that need to sit above AppKit portal views
 /// but don't need the command palette's aggressive focus lock timer.
+/// Focuses the first text field on show, resigns focus on hide.
 @MainActor
 private final class WindowSimpleOverlayController: NSObject {
     private weak var window: NSWindow?
@@ -976,6 +977,7 @@ private final class WindowSimpleOverlayController: NSObject {
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private var installConstraints: [NSLayoutConstraint] = []
     private weak var installedThemeFrame: NSView?
+    private var isVisible = false
 
     init(window: NSWindow) {
         self.window = window
@@ -1021,9 +1023,33 @@ private final class WindowSimpleOverlayController: NSObject {
         return true
     }
 
-    func update(rootView: AnyView, isVisible: Bool) {
+    private func firstEditableTextField(in view: NSView) -> NSTextField? {
+        if let textField = view as? NSTextField,
+           textField.isEditable, textField.isEnabled,
+           !textField.isHiddenOrHasHiddenAncestor {
+            return textField
+        }
+        for subview in view.subviews {
+            if let match = firstEditableTextField(in: subview) { return match }
+        }
+        return nil
+    }
+
+    private func focusFirstTextField() {
+        guard let window else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self, let window = self.window else { return }
+            if let textField = self.firstEditableTextField(in: self.hostingView) {
+                window.makeFirstResponder(textField)
+            }
+        }
+    }
+
+    func update(rootView: AnyView, isVisible newVisible: Bool) {
         guard ensureInstalled() else { return }
-        if isVisible {
+        let wasVisible = isVisible
+        isVisible = newVisible
+        if newVisible {
             hostingView.rootView = rootView
             containerView.capturesMouseEvents = true
             containerView.isHidden = false
@@ -1031,7 +1057,17 @@ private final class WindowSimpleOverlayController: NSObject {
             if let themeFrame = installedThemeFrame, containerView.superview === themeFrame {
                 themeFrame.addSubview(containerView, positioned: .above, relativeTo: nil)
             }
+            if !wasVisible {
+                focusFirstTextField()
+            }
         } else {
+            if wasVisible, let window {
+                // Resign focus from overlay fields back to window content
+                if let responder = window.firstResponder as? NSView,
+                   responder.isDescendant(of: containerView) {
+                    window.makeFirstResponder(nil)
+                }
+            }
             hostingView.rootView = AnyView(EmptyView())
             containerView.capturesMouseEvents = false
             containerView.alphaValue = 0
@@ -3639,35 +3675,41 @@ struct ContentView: View {
 #endif
     }
 
+    private func dismissCloudWorkspaceModal() {
+        isNewCloudWorkspacePresented = false
+    }
+
     private var newCloudWorkspaceOverlay: some View {
         ZStack {
+            // Non-interactive dimming layer
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        isNewCloudWorkspacePresented = false
-                    }
-                }
+                .allowsHitTesting(false)
 
+            // Invisible backdrop that catches clicks outside the modal
+            Color.clear
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onEnded { _ in
+                            dismissCloudWorkspaceModal()
+                        }
+                )
+
+            // Modal content — sits above the backdrop gesture layer
             NewCloudWorkspaceSheet(
                 currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
                 onSubmit: { cloudConfig, label in
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        isNewCloudWorkspacePresented = false
-                    }
+                    dismissCloudWorkspaceModal()
                     provisionCloudWorkspace(config: cloudConfig, label: label)
                 },
                 onLocalWorkspace: {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        isNewCloudWorkspacePresented = false
-                    }
+                    dismissCloudWorkspaceModal()
                     tabManager.addWorkspace()
                 },
                 onDismiss: {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        isNewCloudWorkspacePresented = false
-                    }
+                    dismissCloudWorkspaceModal()
                 }
             )
             .frame(width: 520)
@@ -3683,9 +3725,7 @@ struct ContentView: View {
             .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 8)
         }
         .onExitCommand {
-            withAnimation(.easeOut(duration: 0.15)) {
-                isNewCloudWorkspacePresented = false
-            }
+            dismissCloudWorkspaceModal()
         }
         .zIndex(1500)
     }
