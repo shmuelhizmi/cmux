@@ -7,6 +7,7 @@
 	objects = {
 
 		/* Begin PBXBuildFile section */
+		F1A00005A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00015A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift */; };
 		F1A00001A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00011A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift */; };
 		F1A00002A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00012A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift */; };
 		F1A00003A1B2C3D4E5F60719 /* FlyMachinesAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00013A1B2C3D4E5F60719 /* FlyMachinesAPI.swift */; };
@@ -185,6 +186,7 @@
 /* End PBXContainerItemProxy section */
 
 		/* Begin PBXFileReference section */
+		F1A00015A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewCloudWorkspaceSheet.swift; sourceTree = "<group>"; };
 		F1A00011A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyCloudConfiguration.swift; sourceTree = "<group>"; };
 		F1A00012A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyAuthTokenStore.swift; sourceTree = "<group>"; };
 		F1A00013A1B2C3D4E5F60719 /* FlyMachinesAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyMachinesAPI.swift; sourceTree = "<group>"; };
@@ -480,6 +482,7 @@
 				A5001651 /* CmuxConfig.swift */,
 				A5001653 /* CmuxConfigExecutor.swift */,
 				A5001655 /* CmuxDirectoryTrust.swift */,
+				F1A00015A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift */,
 				F1A00011A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift */,
 				F1A00012A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift */,
 				F1A00013A1B2C3D4E5F60719 /* FlyMachinesAPI.swift */,
@@ -784,6 +787,7 @@
 				A5001650 /* CmuxConfig.swift in Sources */,
 				A5001652 /* CmuxConfigExecutor.swift in Sources */,
 				A5001654 /* CmuxDirectoryTrust.swift in Sources */,
+				F1A00005A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift in Sources */,
 				F1A00001A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift in Sources */,
 				F1A00002A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift in Sources */,
 				F1A00003A1B2C3D4E5F60719 /* FlyMachinesAPI.swift in Sources */,

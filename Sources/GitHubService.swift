@@ -511,7 +511,7 @@ enum GitHubService {
         "/opt/local/bin",
     ]
 
-    private nonisolated static func resolvedCommandPath(
+    nonisolated static func resolvedCommandPath(
         executable: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fallbackDirectories: [String] = fallbackCommandSearchDirectories

@@ -4033,6 +4033,8 @@ class TerminalController {
         let volumeSizeGB = v2StrictInt(params, "volume_size_gb")
         let sshUser = v2String(params, "ssh_user") ?? "root"
         let machineID = v2RawString(params, "machine_id")
+        let gitSetupScript = v2RawString(params, "git_setup_script")
+        let workspaceLabel = v2RawString(params, "workspace_label")
 
         let spec = FlyCloudMachineSpec(
             cpuKind: cpuKind,
@@ -4047,6 +4049,8 @@ class TerminalController {
             machineSpec: spec,
             volumeName: volumeName,
             sshUser: sshUser,
+            gitSetupScript: gitSetupScript,
+            workspaceLabel: workspaceLabel,
             resolvedMachineID: machineID
         )
 

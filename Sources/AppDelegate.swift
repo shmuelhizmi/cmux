@@ -9401,32 +9401,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #if DEBUG
             dlog("shortcut.action name=newWorkspace \(debugShortcutRouteSnapshot(event: event))")
 #endif
-            // Cmd+N semantics:
-            // - If there are no main windows, create a new window.
-            // - Otherwise, create a new workspace in the active window.
+            // Cmd+N opens the cloud workspace creation modal.
+            // If no windows exist, create one first so the sheet has a host.
             if mainWindowContexts.isEmpty {
-                #if DEBUG
-                logWorkspaceCreationRouting(
-                    phase: "fallback_new_window",
-                    source: "shortcut.cmdN",
-                    reason: "no_main_windows",
-                    event: event,
-                    chosenContext: nil
-                )
-                #endif
-                openNewMainWindow(nil)
-            } else if addWorkspaceInPreferredMainWindow(event: event, debugSource: "shortcut.cmdN") == nil {
-                #if DEBUG
-                logWorkspaceCreationRouting(
-                    phase: "fallback_new_window",
-                    source: "shortcut.cmdN",
-                    reason: "workspace_creation_returned_nil",
-                    event: event,
-                    chosenContext: nil
-                )
-                #endif
                 openNewMainWindow(nil)
             }
+            let targetWindow = NSApp.keyWindow ?? NSApp.mainWindow
+            NotificationCenter.default.post(name: .newCloudWorkspaceRequested, object: targetWindow)
             return true
         }
 

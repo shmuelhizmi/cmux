@@ -5262,6 +5262,7 @@ extension Notification.Name {
     static let commandPaletteRenameInputInteractionRequested = Notification.Name("cmux.commandPaletteRenameInputInteractionRequested")
     static let commandPaletteRenameInputDeleteBackwardRequested = Notification.Name("cmux.commandPaletteRenameInputDeleteBackwardRequested")
     static let feedbackComposerRequested = Notification.Name("cmux.feedbackComposerRequested")
+    static let newCloudWorkspaceRequested = Notification.Name("cmux.newCloudWorkspaceRequested")
     static let ghosttyDidSetTitle = Notification.Name("ghosttyDidSetTitle")
     static let ghosttyDidFocusTab = Notification.Name("ghosttyDidFocusTab")
     static let ghosttyDidFocusSurface = Notification.Name("ghosttyDidFocusSurface")

@@ -304,7 +304,14 @@ final class FlyMachineController {
     // MARK: - Remote Configuration Handoff
 
     private func buildRemoteConfiguration(localPort: Int) -> WorkspaceRemoteConfiguration {
-        WorkspaceRemoteConfiguration(
+        let startupCommand: String?
+        if let script = configuration.gitSetupScript, !script.isEmpty {
+            startupCommand = "(\(script)) && cd /workspace/repo 2>/dev/null; exec $SHELL -l"
+        } else {
+            startupCommand = nil
+        }
+
+        return WorkspaceRemoteConfiguration(
             destination: "\(configuration.sshUser)@127.0.0.1",
             port: localPort,
             identityFile: Self.defaultSSHKeyPath(),
@@ -312,13 +319,14 @@ final class FlyMachineController {
                 "StrictHostKeyChecking=no",
                 "UserKnownHostsFile=/dev/null",
                 "LogLevel=ERROR",
+                "ForwardAgent=yes",
             ],
             localProxyPort: nil,
             relayPort: nil,
             relayID: nil,
             relayToken: nil,
             localSocketPath: nil,
-            terminalStartupCommand: nil
+            terminalStartupCommand: startupCommand
         )
     }
 
