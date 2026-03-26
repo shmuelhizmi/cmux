@@ -11484,11 +11484,11 @@ private struct TabItemView: View, Equatable {
                                     // Diff stats on the right
                                     if let additions = pullRequest.additions {
                                         Text("+\(additions)")
-                                            .foregroundColor(diffStatColor(isAddition: true, isActive: isActive))
+                                            .foregroundColor(diffStatColor(isAddition: true))
                                     }
                                     if let deletions = pullRequest.deletions {
                                         Text("-\(deletions)")
-                                            .foregroundColor(diffStatColor(isAddition: false, isActive: isActive))
+                                            .foregroundColor(diffStatColor(isAddition: false))
                                     }
                                 }
                                 .font(.system(size: 10, weight: .semibold))
@@ -11508,7 +11508,7 @@ private struct TabItemView: View, Equatable {
                                 if let reviewDecision = pullRequest.reviewDecision {
                                     Text(reviewDecisionLabel(reviewDecision))
                                         .font(.system(size: 9, weight: .medium))
-                                        .foregroundColor(reviewDecisionColor(reviewDecision, isActive: isActive))
+                                        .foregroundColor(reviewDecisionColor(reviewDecision))
                                         .lineLimit(1)
                                         .padding(.leading, 16)
                                 }
@@ -12285,17 +12285,7 @@ private struct TabItemView: View, Equatable {
         }
     }
 
-    private func reviewDecisionColor(_ decision: SidebarPullRequestReviewDecision, isActive: Bool) -> Color {
-        if isActive {
-            switch decision {
-            case .approved:
-                return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.9))
-            case .changesRequested:
-                return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.9))
-            case .reviewRequired, .pending:
-                return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.6))
-            }
-        }
+    private func reviewDecisionColor(_ decision: SidebarPullRequestReviewDecision) -> Color {
         switch decision {
         case .approved: return .green
         case .changesRequested: return .orange
@@ -12303,11 +12293,8 @@ private struct TabItemView: View, Equatable {
         }
     }
 
-    private func diffStatColor(isAddition: Bool, isActive: Bool) -> Color {
-        if isActive {
-            return Color(nsColor: sidebarSelectedWorkspaceForegroundNSColor(opacity: 0.75))
-        }
-        return isAddition ? .green : .red
+    private func diffStatColor(isAddition: Bool) -> Color {
+        isAddition ? .green : .red
     }
 
     private func logLevelIcon(_ level: SidebarLogLevel) -> String {
