@@ -375,26 +375,19 @@ struct WorkspaceContentView: View {
             )
         }
 
-        ZStack {
-            Group {
-                if isMinimalMode {
-                    bonsplitView
-                        .ignoresSafeArea(.container, edges: .top)
-                        .overlay(alignment: .top) {
-                            if isWorkspaceInputActive {
-                                TitlebarDoubleClickMonitorView()
-                                    .frame(height: WorkspaceTitlebarInteractionMetrics.minimalModeTopStripHeight)
-                            }
-                        }
-                } else {
-                    bonsplitView
+        if shouldShowProvisioningOverlay {
+            CloudProvisioningOverlay(workspace: workspace)
+        } else if isMinimalMode {
+            bonsplitView
+                .ignoresSafeArea(.container, edges: .top)
+                .overlay(alignment: .top) {
+                    if isWorkspaceInputActive {
+                        TitlebarDoubleClickMonitorView()
+                            .frame(height: WorkspaceTitlebarInteractionMetrics.minimalModeTopStripHeight)
+                    }
                 }
-            }
-
-            if shouldShowProvisioningOverlay {
-                CloudProvisioningOverlay(workspace: workspace)
-                    .transition(.opacity)
-            }
+        } else {
+            bonsplitView
         }
     }
 
