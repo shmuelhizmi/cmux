@@ -4,20 +4,31 @@ import Security
 #endif
 
 /// Keychain-backed storage for the Daytona API key.
-/// Uses the data protection keychain (supports Touch ID / Apple Watch unlock).
 /// Falls back to the `DAYTONA_API_KEY` environment variable.
 enum DaytonaAuthTokenStore {
     private static let keychainService = "cmux"
     private static let keychainAccount = "Daytona API Key"
 
-    /// Returns the Daytona API key, checking Keychain then environment.
+    /// In-process cache so we only hit the Keychain once per app launch.
+    private static var cachedToken: String?
+    private static var cacheLoaded = false
+
+    /// Returns the Daytona API key, checking cache, Keychain, then environment.
     static func token() -> String? {
+        if cacheLoaded, let cached = cachedToken {
+            return cached
+        }
         if let stored = loadFromKeychain() {
+            cachedToken = stored
+            cacheLoaded = true
             return stored
         }
         if let env = ProcessInfo.processInfo.environment["DAYTONA_API_KEY"], !env.isEmpty {
+            cachedToken = env
+            cacheLoaded = true
             return env
         }
+        cacheLoaded = true
         return nil
     }
 
@@ -32,11 +43,14 @@ enum DaytonaAuthTokenStore {
             kSecAttrService: keychainService,
             kSecAttrAccount: keychainAccount,
             kSecValueData: data,
-            kSecUseDataProtectionKeychain: true,
-            kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
         let status = SecItemAdd(query as CFDictionary, nil)
-        return status == errSecSuccess
+        if status == errSecSuccess {
+            cachedToken = token
+            cacheLoaded = true
+            return true
+        }
+        return false
         #else
         return false
         #endif
@@ -45,7 +59,9 @@ enum DaytonaAuthTokenStore {
     /// Removes the API key from the Keychain.
     @discardableResult
     static func clearToken() -> Bool {
-        deleteFromKeychain()
+        cachedToken = nil
+        cacheLoaded = false
+        return deleteFromKeychain()
     }
 
     // MARK: - Private
@@ -58,7 +74,6 @@ enum DaytonaAuthTokenStore {
             kSecAttrAccount: keychainAccount,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
-            kSecUseDataProtectionKeychain: true,
         ]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -78,7 +93,6 @@ enum DaytonaAuthTokenStore {
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: keychainService,
             kSecAttrAccount: keychainAccount,
-            kSecUseDataProtectionKeychain: true,
         ]
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
