@@ -174,11 +174,14 @@ final class DaytonaSandboxController {
         return WorkspaceRemoteConfiguration(
             destination: "\(sshToken)@ssh.app.daytona.io",
             port: nil,
-            identityFile: nil,
+            identityFile: Self.defaultSSHKeyPath(),
             sshOptions: [
                 "StrictHostKeyChecking=no",
                 "UserKnownHostsFile=/dev/null",
                 "LogLevel=ERROR",
+                // Daytona SSH proxy authenticates via the token embedded in the username.
+                // Offer publickey first (SSH handshake needs it), then fall back to none.
+                "PreferredAuthentications=publickey,none,keyboard-interactive",
             ],
             localProxyPort: nil,
             relayPort: nil,
@@ -187,6 +190,23 @@ final class DaytonaSandboxController {
             localSocketPath: nil,
             terminalStartupCommand: startupCommand
         )
+    }
+    // MARK: - Helpers
+
+    /// Returns the path to the user's default SSH private key, if it exists.
+    private static func defaultSSHKeyPath() -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "\(home)/.ssh/id_ed25519",
+            "\(home)/.ssh/id_rsa",
+            "\(home)/.ssh/id_ecdsa",
+        ]
+        for path in candidates {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        return nil
     }
 }
 

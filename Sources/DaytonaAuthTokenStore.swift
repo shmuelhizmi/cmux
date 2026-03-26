@@ -4,6 +4,7 @@ import Security
 #endif
 
 /// Keychain-backed storage for the Daytona API key.
+/// Uses the data protection keychain (supports Touch ID / Apple Watch unlock).
 /// Falls back to the `DAYTONA_API_KEY` environment variable.
 enum DaytonaAuthTokenStore {
     private static let keychainService = "com.cmux.daytona-api-key"
@@ -31,6 +32,8 @@ enum DaytonaAuthTokenStore {
             kSecAttrService: keychainService,
             kSecAttrAccount: keychainAccount,
             kSecValueData: data,
+            kSecUseDataProtectionKeychain: true,
+            kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
         let status = SecItemAdd(query as CFDictionary, nil)
         return status == errSecSuccess
@@ -55,6 +58,7 @@ enum DaytonaAuthTokenStore {
             kSecAttrAccount: keychainAccount,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
+            kSecUseDataProtectionKeychain: true,
         ]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -74,6 +78,7 @@ enum DaytonaAuthTokenStore {
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: keychainService,
             kSecAttrAccount: keychainAccount,
+            kSecUseDataProtectionKeychain: true,
         ]
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
