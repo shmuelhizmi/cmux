@@ -154,6 +154,9 @@ final class FlyMachineController {
     // MARK: - Machine Creation
 
     private func createMachine() async throws -> FlyMachine {
+        // Ensure the fly.io app exists (creates it if not, ignores "already exists")
+        try await api.ensureAppExists(name: configuration.appName)
+
         let spec = configuration.machineSpec
 
         // If a volume is requested, ensure it exists

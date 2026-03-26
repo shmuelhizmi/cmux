@@ -13,6 +13,26 @@ struct FlyMachinesAPI: Sendable {
         self.baseURL = baseURL
     }
 
+    // MARK: - App Management
+
+    func createApp(name: String, org: String = "personal") async throws {
+        let body = FlyAppCreateRequest(appName: name, orgSlug: org)
+        let _: FlyEmptyResponse = try await post(path: "/v1/apps", body: body)
+    }
+
+    /// Creates the app if it doesn't exist. Ignores "already exists" errors.
+    func ensureAppExists(name: String) async throws {
+        do {
+            try await createApp(name: name)
+        } catch let error as FlyAPIError {
+            // 422 = app already exists, which is fine
+            if case .httpError(let code, _) = error, code == 422 {
+                return
+            }
+            throw error
+        }
+    }
+
     // MARK: - Machine Lifecycle
 
     func createMachine(app: String, config: FlyMachineCreateRequest) async throws -> FlyMachine {
@@ -158,6 +178,11 @@ enum FlyAPIError: LocalizedError {
 }
 
 // MARK: - Request Models
+
+struct FlyAppCreateRequest: Encodable {
+    let appName: String
+    let orgSlug: String
+}
 
 struct FlyMachineCreateRequest: Encodable {
     let name: String?
