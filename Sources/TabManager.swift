@@ -673,16 +673,12 @@ class TabManager: ObservableObject {
         let panelId: UUID
     }
 
-    struct GitHubPullRequestProbeItem: Decodable, Equatable {
-        let number: Int
-        let state: String
-        let url: String
-        let updatedAt: String?
-    }
+    typealias GitHubPullRequestProbeItem = GitHubService.PullRequestProbeItem
 
-    private struct GitHubPullRequestCheckItem: Decodable {
-        let bucket: String?
-        let state: String?
+    nonisolated static func preferredPullRequest(
+        from pullRequests: [GitHubPullRequestProbeItem]
+    ) -> GitHubPullRequestProbeItem? {
+        GitHubService.preferredPullRequest(from: pullRequests)
     }
 
     /// The window that owns this TabManager. Set by AppDelegate.registerMainWindow().
@@ -699,7 +695,6 @@ class TabManager: ObservableObject {
     private static var nextPortOrdinal: Int = 0
     private static let initialWorkspaceGitProbeDelays: [TimeInterval] = [0, 0.5, 1.5, 3.0, 6.0, 10.0]
     private static let workspaceGitMetadataPollInterval: TimeInterval = 30
-    private nonisolated static let workspacePullRequestProbeTimeout: TimeInterval = 5.0
     @Published var selectedTabId: UUID? {
         willSet {
 #if DEBUG
@@ -1563,297 +1558,37 @@ class TabManager: ObservableObject {
         directory: String,
         branch: String
     ) -> WorkspacePullRequestSnapshot {
-        guard !shouldSkipWorkspacePullRequestLookup(branch: branch) else {
-            return .notFound
-        }
-
-        let repoSlugs = githubRepositorySlugs(directory: directory)
-        guard !repoSlugs.isEmpty else {
-            return .unsupportedRepository
-        }
-
-        var sawTransientFailure = false
-        for repoSlug in repoSlugs {
-            switch workspacePullRequestSnapshot(directory: directory, branch: branch, repoSlug: repoSlug) {
-            case .resolved(let pullRequest):
-                return .resolved(pullRequest)
-            case .transientFailure:
-                sawTransientFailure = true
-            case .notFound, .unsupportedRepository:
-                continue
-            }
-        }
-
-        return sawTransientFailure ? .transientFailure : .notFound
+        let result = GitHubService.lookupPullRequest(directory: directory, branch: branch)
+        return convertGitHubLookupResult(result)
     }
 
-    private nonisolated static func workspacePullRequestSnapshot(
-        directory: String,
-        branch: String,
-        repoSlug: String
+    private nonisolated static func convertGitHubLookupResult(
+        _ result: GitHubService.LookupResult
     ) -> WorkspacePullRequestSnapshot {
-        let result = runCommandResult(
-            directory: directory,
-            executable: "gh",
-            arguments: [
-                "pr", "list",
-                "--repo", repoSlug,
-                "--state", "all",
-                "--head", branch,
-                "--json", "number,state,url,updatedAt",
-            ],
-            timeout: workspacePullRequestProbeTimeout
-        )
-
-        guard let result else {
-#if DEBUG
-            dlog(
-                "workspace.gitProbe.pr.fail dir=\(directory) branch=\(branch) " +
-                "repo=\(repoSlug) status=nil"
-            )
-#endif
-            return .transientFailure
-        }
-
-        guard !result.timedOut,
-              result.executionError == nil,
-              let exitStatus = result.exitStatus else {
-#if DEBUG
-            let statusText: String
-            if result.timedOut {
-                statusText = "timeout"
-            } else if let executionError = result.executionError {
-                statusText = "error=\(executionError)"
-            } else {
-                statusText = "unknown"
-            }
-            let stderr = debugLogSnippet(result.stderr) ?? "none"
-            dlog(
-                "workspace.gitProbe.pr.fail dir=\(directory) branch=\(branch) " +
-                "repo=\(repoSlug) status=\(statusText) stderr=\(stderr)"
-            )
-#endif
-            return .transientFailure
-        }
-
-        if exitStatus != 0 {
-#if DEBUG
-            dlog(
-                "workspace.gitProbe.pr.fail dir=\(directory) branch=\(branch) " +
-                "repo=\(repoSlug) status=exit=\(exitStatus) stderr=\(debugLogSnippet(result.stderr) ?? "none")"
-            )
-#endif
-            return .transientFailure
-        }
-
-        let output = result.stdout ?? ""
-        guard let pullRequests = decodeJSON([GitHubPullRequestProbeItem].self, from: output) else {
-#if DEBUG
-            dlog(
-                "workspace.gitProbe.pr.parseFail dir=\(directory) branch=\(branch) " +
-                "repo=\(repoSlug) output=\(debugLogSnippet(output) ?? "none")"
-            )
-#endif
-            return .transientFailure
-        }
-
-        guard let pullRequest = preferredPullRequest(from: pullRequests) else {
-#if DEBUG
-            dlog(
-                "workspace.gitProbe.pr.none dir=\(directory) branch=\(branch) " +
-                "repo=\(repoSlug)"
-            )
-#endif
+        switch result {
+        case .unsupportedRepository:
+            return .unsupportedRepository
+        case .notFound:
             return .notFound
-        }
-
-        guard let status = pullRequestStatus(from: pullRequest.state),
-              let url = URL(string: pullRequest.url) else {
-#if DEBUG
-            dlog(
-                "workspace.gitProbe.pr.parseFail dir=\(directory) branch=\(branch) " +
-                "repo=\(repoSlug) output=\(debugLogSnippet(output) ?? "none")"
-            )
-#endif
+        case .transientFailure:
             return .transientFailure
-        }
-
-        let checks = status == .open
-            ? pullRequestChecksStatus(number: pullRequest.number, directory: directory, repoSlug: repoSlug)
-            : nil
-
-#if DEBUG
-        dlog(
-            "workspace.gitProbe.pr.success dir=\(directory) branch=\(branch) " +
-            "repo=\(repoSlug) number=\(pullRequest.number) state=\(status.rawValue) checks=\(checks?.rawValue ?? "none")"
-        )
-#endif
-        return .resolved(
-            SidebarPullRequestState(
-                number: pullRequest.number,
-                label: "PR",
-                url: url,
-                status: status,
-                branch: branch,
-                checks: checks
+        case .resolved(let info):
+            return .resolved(
+                SidebarPullRequestState(
+                    number: info.number,
+                    label: "PR",
+                    url: info.url,
+                    status: info.status,
+                    branch: info.branch,
+                    checks: info.checks,
+                    title: info.title,
+                    additions: info.additions,
+                    deletions: info.deletions,
+                    reviewDecision: info.reviewDecision,
+                    checksTotal: info.checksTotal,
+                    checksPassed: info.checksPassed
+                )
             )
-        )
-    }
-
-    nonisolated static func preferredPullRequest(
-        from pullRequests: [GitHubPullRequestProbeItem]
-    ) -> GitHubPullRequestProbeItem? {
-        func statusPriority(_ status: SidebarPullRequestStatus) -> Int {
-            switch status {
-            case .open:
-                return 3
-            case .merged:
-                return 2
-            case .closed:
-                return 1
-            }
-        }
-
-        func isPreferred(
-            candidate: GitHubPullRequestProbeItem,
-            over current: GitHubPullRequestProbeItem
-        ) -> Bool {
-            guard let candidateStatus = pullRequestStatus(from: candidate.state),
-                  let currentStatus = pullRequestStatus(from: current.state) else {
-                return false
-            }
-
-            let candidatePriority = statusPriority(candidateStatus)
-            let currentPriority = statusPriority(currentStatus)
-            if candidatePriority != currentPriority {
-                return candidatePriority > currentPriority
-            }
-
-            let candidateUpdatedAt = candidate.updatedAt ?? ""
-            let currentUpdatedAt = current.updatedAt ?? ""
-            if candidateUpdatedAt != currentUpdatedAt {
-                return candidateUpdatedAt > currentUpdatedAt
-            }
-
-            return candidate.number > current.number
-        }
-
-        var best: GitHubPullRequestProbeItem?
-        for pullRequest in pullRequests {
-            guard pullRequestStatus(from: pullRequest.state) != nil,
-                  URL(string: pullRequest.url) != nil else {
-                continue
-            }
-            guard let currentBest = best else {
-                best = pullRequest
-                continue
-            }
-            if isPreferred(candidate: pullRequest, over: currentBest) {
-                best = pullRequest
-            }
-        }
-        return best
-    }
-
-    private nonisolated static func pullRequestChecksStatus(
-        number: Int,
-        directory: String,
-        repoSlug: String
-    ) -> SidebarPullRequestChecksStatus? {
-        let result = runCommandResult(
-            directory: directory,
-            executable: "gh",
-            arguments: [
-                "pr", "checks", String(number),
-                "--repo", repoSlug,
-                "--json", "bucket,state"
-            ],
-            timeout: workspacePullRequestProbeTimeout
-        )
-
-        guard let result,
-              !result.timedOut,
-              result.executionError == nil,
-              let output = result.stdout,
-              let exitStatus = result.exitStatus,
-              exitStatus == 0 || exitStatus == 8,
-              let checks = decodeJSON([GitHubPullRequestCheckItem].self, from: output) else {
-            return nil
-        }
-
-        var sawPending = false
-        var sawPass = false
-
-        for check in checks {
-            let bucket = check.bucket?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let state = check.state?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
-            if isFailingCheckState(bucket: bucket, state: state) {
-                return .fail
-            }
-            if isPendingCheckState(bucket: bucket, state: state) {
-                sawPending = true
-                continue
-            }
-            if isPassingCheckState(bucket: bucket, state: state) {
-                sawPass = true
-            }
-        }
-
-        if sawPending {
-            return .pending
-        }
-        if sawPass {
-            return .pass
-        }
-        return nil
-    }
-
-    private nonisolated static func pullRequestStatus(
-        from rawState: String
-    ) -> SidebarPullRequestStatus? {
-        switch rawState.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
-        case "OPEN":
-            return .open
-        case "MERGED":
-            return .merged
-        case "CLOSED":
-            return .closed
-        default:
-            return nil
-        }
-    }
-
-    private nonisolated static func decodeJSON<T: Decodable>(_ type: T.Type, from text: String) -> T? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(T.self, from: data)
-    }
-
-    private nonisolated static func isFailingCheckState(bucket: String?, state: String?) -> Bool {
-        switch bucket ?? state ?? "" {
-        case "fail", "failure", "failed", "error", "timed_out", "timedout",
-             "cancel", "cancelled", "canceled", "action_required", "startup_failure":
-            return true
-        default:
-            return false
-        }
-    }
-
-    private nonisolated static func isPendingCheckState(bucket: String?, state: String?) -> Bool {
-        switch bucket ?? state ?? "" {
-        case "pending", "queued", "in_progress", "requested", "waiting", "expected":
-            return true
-        default:
-            return false
-        }
-    }
-
-    private nonisolated static func isPassingCheckState(bucket: String?, state: String?) -> Bool {
-        switch bucket ?? state ?? "" {
-        case "pass", "success", "successful", "completed", "neutral", "skipping", "skipped":
-            return true
-        default:
-            return false
         }
     }
 
@@ -2006,122 +1741,19 @@ class TabManager: ObservableObject {
         )
     }
 
+    // MARK: - GitHubService delegation (test-visible wrappers)
+
     nonisolated static func githubRepositorySlugs(fromGitRemoteVOutput output: String) -> [String] {
-        var slugByRemoteName: [String: String] = [:]
-
-        for line in output.split(whereSeparator: \.isNewline) {
-            let parts = line.split(whereSeparator: \.isWhitespace)
-            guard parts.count >= 3 else { continue }
-
-            let remoteName = String(parts[0])
-            let remoteURL = String(parts[1])
-            let remoteKind = String(parts[2])
-            guard remoteKind == "(fetch)",
-                  let repoSlug = githubRepositorySlug(fromRemoteURL: remoteURL) else {
-                continue
-            }
-
-            if slugByRemoteName[remoteName] == nil {
-                slugByRemoteName[remoteName] = repoSlug
-            }
-        }
-
-        let orderedRemoteNames = slugByRemoteName.keys.sorted { lhs, rhs in
-            let lhsPriority = githubRemotePriority(lhs)
-            let rhsPriority = githubRemotePriority(rhs)
-            if lhsPriority != rhsPriority {
-                return lhsPriority < rhsPriority
-            }
-            return lhs < rhs
-        }
-
-        var orderedSlugs: [String] = []
-        var seen: Set<String> = []
-        for remoteName in orderedRemoteNames {
-            guard let repoSlug = slugByRemoteName[remoteName],
-                  seen.insert(repoSlug).inserted else {
-                continue
-            }
-            orderedSlugs.append(repoSlug)
-        }
-        return orderedSlugs
+        GitHubService.repositorySlugs(fromGitRemoteVOutput: output)
     }
 
-    private nonisolated static func githubRepositorySlugs(directory: String) -> [String] {
-        guard let output = runGitCommand(directory: directory, arguments: ["remote", "-v"]) else {
-            return []
-        }
-        return githubRepositorySlugs(fromGitRemoteVOutput: output)
-    }
-
-    private nonisolated static func githubRemotePriority(_ remoteName: String) -> Int {
-        switch remoteName.lowercased() {
-        case "upstream":
-            return 0
-        case "origin":
-            return 1
-        default:
-            return 2
-        }
-    }
-
-    private nonisolated static func githubRepositorySlug(fromRemoteURL remoteURL: String) -> String? {
-        let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        let githubPrefixes = [
-            "git@github.com:",
-            "ssh://git@github.com/",
-            "https://github.com/",
-            "http://github.com/",
-            "git://github.com/",
-        ]
-        for prefix in githubPrefixes where trimmed.hasPrefix(prefix) {
-            let path = String(trimmed.dropFirst(prefix.count))
-            return normalizedGitHubRepositorySlug(path)
-        }
-
-        guard let url = URL(string: trimmed),
-              let host = url.host?.lowercased(),
-              host == "github.com" else {
-            return nil
-        }
-
-        return normalizedGitHubRepositorySlug(url.path)
-    }
-
-    private nonisolated static func normalizedGitHubRepositorySlug(_ rawPath: String) -> String? {
-        let trimmedPath = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !trimmedPath.isEmpty else { return nil }
-        let components = trimmedPath.split(separator: "/").map(String.init)
-        guard components.count >= 2 else { return nil }
-        let owner = components[0]
-        var repo = components[1]
-        if repo.hasSuffix(".git") {
-            repo.removeLast(4)
-        }
-        guard !owner.isEmpty, !repo.isEmpty else { return nil }
-        return "\(owner)/\(repo)"
-    }
-
-    private nonisolated static func debugLogSnippet(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else { return nil }
-        return String(trimmed.prefix(180))
+    nonisolated static func shouldSkipWorkspacePullRequestLookup(branch: String) -> Bool {
+        GitHubService.shouldSkipLookup(branch: branch)
     }
 
     private nonisolated static func normalizedBranchName(_ branch: String?) -> String? {
         let trimmed = branch?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    nonisolated static func shouldSkipWorkspacePullRequestLookup(branch: String) -> Bool {
-        switch normalizedBranchName(branch) {
-        case "main", "master":
-            return true
-        default:
-            return false
-        }
     }
 
     func requestBackgroundWorkspaceLoad(for workspaceId: UUID) {
