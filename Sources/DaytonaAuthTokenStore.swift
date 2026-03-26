@@ -3,27 +3,24 @@ import Foundation
 import Security
 #endif
 
-/// Keychain-backed storage for the fly.io API token.
-/// Falls back to the `FLY_API_TOKEN` environment variable.
-enum FlyAuthTokenStore {
-    private static let keychainService = "com.cmux.fly-api-token"
-    private static let keychainAccount = "fly-api-token"
+/// Keychain-backed storage for the Daytona API key.
+/// Falls back to the `DAYTONA_API_KEY` environment variable.
+enum DaytonaAuthTokenStore {
+    private static let keychainService = "com.cmux.daytona-api-key"
+    private static let keychainAccount = "daytona-api-key"
 
-    /// Returns the fly.io API token, checking Keychain, environment, then `fly auth token` CLI.
+    /// Returns the Daytona API key, checking Keychain then environment.
     static func token() -> String? {
         if let stored = loadFromKeychain() {
             return stored
         }
-        if let env = ProcessInfo.processInfo.environment["FLY_API_TOKEN"], !env.isEmpty {
+        if let env = ProcessInfo.processInfo.environment["DAYTONA_API_KEY"], !env.isEmpty {
             return env
-        }
-        if let cliToken = tokenFromFlyCLI() {
-            return cliToken
         }
         return nil
     }
 
-    /// Stores the token in the macOS Keychain.
+    /// Stores the API key in the macOS Keychain.
     @discardableResult
     static func setToken(_ token: String) -> Bool {
         #if canImport(Security)
@@ -42,7 +39,7 @@ enum FlyAuthTokenStore {
         #endif
     }
 
-    /// Removes the token from the Keychain.
+    /// Removes the API key from the Keychain.
     @discardableResult
     static func clearToken() -> Bool {
         deleteFromKeychain()
@@ -68,35 +65,6 @@ enum FlyAuthTokenStore {
         #else
         return nil
         #endif
-    }
-
-    private static func tokenFromFlyCLI() -> String? {
-        let candidates = [
-            "/opt/homebrew/bin/fly",
-            "/usr/local/bin/fly",
-            "/opt/homebrew/bin/flyctl",
-            "/usr/local/bin/flyctl",
-        ]
-        guard let flyPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            return nil
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: flyPath)
-        process.arguments = ["auth", "token"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let output, !output.isEmpty else { return nil }
-        return output
     }
 
     @discardableResult

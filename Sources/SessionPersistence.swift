@@ -340,7 +340,7 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     var logEntries: [SessionLogEntrySnapshot]
     var progress: SessionProgressSnapshot?
     var gitBranch: SessionGitBranchSnapshot?
-    var cloudConfiguration: FlyCloudConfiguration?
+    var cloudConfiguration: DaytonaCloudConfiguration?
 }
 
 struct SessionTabManagerSnapshot: Codable, Sendable {

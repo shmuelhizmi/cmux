@@ -5535,22 +5535,22 @@ final class Workspace: Identifiable, ObservableObject {
     }()
     nonisolated(unsafe) static var runSSHControlMasterCommandOverrideForTesting: (([String]) -> Void)?
 
-    // MARK: - Fly.io Cloud Machine
+    // MARK: - Cloud Sandbox
 
-    @Published var cloudConfiguration: FlyCloudConfiguration?
-    @Published var cloudMachineState: FlyCloudMachineState = .stopped
+    @Published var cloudConfiguration: DaytonaCloudConfiguration?
+    @Published var cloudMachineState: DaytonaCloudMachineState = .stopped
     @Published var cloudMachineDetail: String?
-    var flyMachineController: FlyMachineController?
+    var sandboxController: DaytonaSandboxController?
 
     func stopCloudMachineIfNeeded() {
-        guard flyMachineController != nil else { return }
-        flyMachineController?.stop()
-        flyMachineController = nil
+        guard sandboxController != nil else { return }
+        sandboxController?.stop()
+        sandboxController = nil
     }
 
     func destroyCloudMachine() {
-        flyMachineController?.destroy()
-        flyMachineController = nil
+        sandboxController?.destroy()
+        sandboxController = nil
     }
 
     private var panelShellActivityStates: [UUID: PanelShellActivityState] = [:]
@@ -5807,7 +5807,7 @@ final class Workspace: Identifiable, ObservableObject {
     deinit {
         activeRemoteSessionControllerID = nil
         remoteSessionController?.stop()
-        // FlyMachineController cleanup is handled by stopCloudMachineIfNeeded() in
+        // DaytonaSandboxController cleanup is handled by stopCloudMachineIfNeeded() in
         // TabManager.closeWorkspace() before the workspace is deallocated.
     }
 

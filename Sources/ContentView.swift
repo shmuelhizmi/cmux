@@ -3700,7 +3700,7 @@ struct ContentView: View {
                     currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
                     onSubmit: { cloudConfig, label in
 #if DEBUG
-                        dlog("cloud.modal.onSubmit label=\(label ?? "nil") app=\(cloudConfig.appName)")
+                        dlog("cloud.modal.onSubmit label=\(label ?? "nil") snapshot=\(cloudConfig.sandboxSpec.snapshot ?? "default")")
 #endif
                         if let error = cloudProvisioningPreconditionError() {
                             cloudWorkspaceModalError = error
@@ -6956,28 +6956,19 @@ struct ContentView: View {
     }
 
     private func cloudProvisioningPreconditionError() -> String? {
-        if FlyAuthTokenStore.token() == nil {
-            return "No fly.io API token configured. Set FLY_API_TOKEN environment variable or run: cmux cloud configure-token"
-        }
-        if FlyMachineController.readDefaultSSHPublicKey() == nil {
-            return "No SSH public key found in ~/.ssh/. Generate one with: ssh-keygen -t ed25519"
+        if DaytonaAuthTokenStore.token() == nil {
+            return String(localized: "cloud.error.noApiKey", defaultValue: "No Daytona API key configured. Set DAYTONA_API_KEY environment variable or run: cmux cloud configure-token")
         }
         return nil
     }
 
-    private func provisionCloudWorkspace(config: FlyCloudConfiguration, label: String?) {
+    private func provisionCloudWorkspace(config: DaytonaCloudConfiguration, label: String?) {
 #if DEBUG
-        dlog("cloud.modal.provision label=\(label ?? "nil") app=\(config.appName)")
+        dlog("cloud.modal.provision label=\(label ?? "nil") snapshot=\(config.sandboxSpec.snapshot ?? "default")")
 #endif
-        guard let token = FlyAuthTokenStore.token() else {
+        guard let token = DaytonaAuthTokenStore.token() else {
 #if DEBUG
-            dlog("cloud.modal.provision FAIL: no fly.io API token")
-#endif
-            return
-        }
-        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else {
-#if DEBUG
-            dlog("cloud.modal.provision FAIL: no SSH public key")
+            dlog("cloud.modal.provision FAIL: no Daytona API key")
 #endif
             return
         }
@@ -6989,13 +6980,12 @@ struct ContentView: View {
         workspace.cloudConfiguration = config
         workspace.cloudMachineState = .creating
 
-        let controller = FlyMachineController(
+        let controller = DaytonaSandboxController(
             workspace: workspace,
             configuration: config,
-            apiToken: token,
-            sshPublicKey: sshPublicKey
+            apiToken: token
         )
-        workspace.flyMachineController = controller
+        workspace.sandboxController = controller
         controller.start()
     }
 
