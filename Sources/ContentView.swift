@@ -3680,39 +3680,40 @@ struct ContentView: View {
     }
 
     private var newCloudWorkspaceOverlay: some View {
-        ZStack {
-            // Dimming backdrop — no gesture handling here, dismiss is via NSEvent monitor
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-            NewCloudWorkspaceSheet(
-                currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
-                onSubmit: { cloudConfig, label in
-                    dismissCloudWorkspaceModal()
-                    provisionCloudWorkspace(config: cloudConfig, label: label)
-                },
-                onLocalWorkspace: {
-                    dismissCloudWorkspaceModal()
-                    tabManager.addWorkspace()
-                },
-                onDismiss: {
-                    dismissCloudWorkspaceModal()
-                }
-            )
-            .frame(width: 520)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.98))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 8)
-        }
-        .zIndex(1500)
+        // Backdrop with onTapGesture to dismiss. The modal content is placed via
+        // .overlay so its buttons get click priority over the backdrop gesture.
+        Color.black.opacity(0.3)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture { dismissCloudWorkspaceModal() }
+            .overlay {
+                NewCloudWorkspaceSheet(
+                    currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
+                    onSubmit: { cloudConfig, label in
+                        dismissCloudWorkspaceModal()
+                        provisionCloudWorkspace(config: cloudConfig, label: label)
+                    },
+                    onLocalWorkspace: {
+                        dismissCloudWorkspaceModal()
+                        tabManager.addWorkspace()
+                    },
+                    onDismiss: {
+                        dismissCloudWorkspaceModal()
+                    }
+                )
+                .frame(width: 520)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.98))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 8)
+            }
+            .zIndex(1500)
     }
 
     private var commandPaletteOverlay: some View {
