@@ -26,7 +26,7 @@ struct FlyMachinesAPI: Sendable {
             try await createApp(name: name)
         } catch let error as FlyAPIError {
             // 422 = app already exists, which is fine
-            if case .httpError(let code, _) = error, code == 422 {
+            if case .httpError(let code, _, _) = error, code == 422 {
                 return
             }
             throw error
@@ -101,8 +101,8 @@ struct FlyMachinesAPI: Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
-        try Self.checkResponse(response, data: data)
-        return try Self.decoder.decode(T.self, from: data)
+        try Self.checkResponse(response, data: data, path: path)
+        return try Self.decodeResponse(T.self, from: data, path: path, method: "GET")
     }
 
     private func post<B: Encodable, T: Decodable>(
@@ -116,8 +116,8 @@ struct FlyMachinesAPI: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = try Self.encoder.encode(body)
         let (data, response) = try await URLSession.shared.data(for: request)
-        try Self.checkResponse(response, data: data)
-        return try Self.decoder.decode(T.self, from: data)
+        try Self.checkResponse(response, data: data, path: path)
+        return try Self.decodeResponse(T.self, from: data, path: path, method: "POST")
     }
 
     private func post<T: Decodable>(path: String) async throws -> T {
@@ -126,8 +126,8 @@ struct FlyMachinesAPI: Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
-        try Self.checkResponse(response, data: data)
-        return try Self.decoder.decode(T.self, from: data)
+        try Self.checkResponse(response, data: data, path: path)
+        return try Self.decodeResponse(T.self, from: data, path: path, method: "POST")
     }
 
     private func delete(path: String) async throws {
@@ -135,16 +135,31 @@ struct FlyMachinesAPI: Sendable {
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
-        try Self.checkResponse(response, data: data)
+        try Self.checkResponse(response, data: data, path: path)
     }
 
-    private static func checkResponse(_ response: URLResponse, data: Data) throws {
+    private static func checkResponse(_ response: URLResponse, data: Data, path: String) throws {
         guard let http = response as? HTTPURLResponse else {
-            throw FlyAPIError.invalidResponse
+            throw FlyAPIError.invalidResponse(path: path)
         }
         guard (200...299).contains(http.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "unknown"
-            throw FlyAPIError.httpError(statusCode: http.statusCode, body: message)
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            throw FlyAPIError.httpError(statusCode: http.statusCode, path: path, body: body)
+        }
+    }
+
+    private static func decodeResponse<T: Decodable>(_ type: T.Type, from data: Data, path: String, method: String) throws -> T {
+        do {
+            return try decoder.decode(type, from: data)
+        } catch {
+            let bodyPreview = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            throw FlyAPIError.decodeFailed(
+                path: path,
+                method: method,
+                type: String(describing: type),
+                body: bodyPreview,
+                underlying: error.localizedDescription
+            )
         }
     }
 
@@ -164,15 +179,18 @@ struct FlyMachinesAPI: Sendable {
 // MARK: - Error
 
 enum FlyAPIError: LocalizedError {
-    case invalidResponse
-    case httpError(statusCode: Int, body: String)
+    case invalidResponse(path: String)
+    case httpError(statusCode: Int, path: String, body: String)
+    case decodeFailed(path: String, method: String, type: String, body: String, underlying: String)
 
     var errorDescription: String? {
         switch self {
-        case .invalidResponse:
-            return "Invalid response from fly.io API"
-        case .httpError(let code, let body):
-            return "fly.io API error (\(code)): \(body)"
+        case .invalidResponse(let path):
+            return "fly.io: invalid response from \(path)"
+        case .httpError(let code, let path, let body):
+            return "fly.io \(path) (\(code)): \(body)"
+        case .decodeFailed(let path, let method, let type, let body, let underlying):
+            return "fly.io \(method) \(path): failed to decode \(type): \(underlying)\nResponse: \(body)"
         }
     }
 }
