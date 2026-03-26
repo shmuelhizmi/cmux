@@ -117,7 +117,7 @@ final class FlyMachineController {
 
             // Step 3: Wait for machine to be started
             workspace.cloudMachineState = .starting
-            _ = try await api.waitForState(
+            try await api.waitForState(
                 app: configuration.appName,
                 machineID: machineID,
                 state: "started",
