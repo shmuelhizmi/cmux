@@ -2518,6 +2518,7 @@ class TabManager: ObservableObject {
         AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: workspace.id)
         workspace.teardownAllPanels()
         workspace.teardownRemoteConnection()
+        workspace.stopCloudMachineIfNeeded()
         unwireClosedBrowserTracking(for: workspace)
         workspace.owningTabManager = nil
 
@@ -5440,6 +5441,7 @@ extension TabManager {
         AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: workspace.id)
         workspace.teardownAllPanels()
         workspace.teardownRemoteConnection()
+        workspace.stopCloudMachineIfNeeded()
         workspace.owningTabManager = nil
     }
 

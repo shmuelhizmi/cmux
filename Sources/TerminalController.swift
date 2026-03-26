@@ -2082,6 +2082,20 @@ class TerminalController {
         case "workspace.remote.terminal_session_end":
             return v2Result(id: id, self.v2WorkspaceRemoteTerminalSessionEnd(params: params))
 
+        // Cloud (fly.io)
+        case "workspace.cloud.provision":
+            return v2Result(id: id, self.v2WorkspaceCloudProvision(params: params))
+        case "workspace.cloud.resume":
+            return v2Result(id: id, self.v2WorkspaceCloudResume(params: params))
+        case "workspace.cloud.stop":
+            return v2Result(id: id, self.v2WorkspaceCloudStop(params: params))
+        case "workspace.cloud.destroy":
+            return v2Result(id: id, self.v2WorkspaceCloudDestroy(params: params))
+        case "workspace.cloud.status":
+            return v2Result(id: id, self.v2WorkspaceCloudStatus(params: params))
+        case "workspace.cloud.configure_token":
+            return v2Result(id: id, self.v2WorkspaceCloudConfigureToken(params: params))
+
         // Settings
         case "settings.open":
             return v2Result(id: id, self.v2SettingsOpen(params: params))
@@ -2448,6 +2462,12 @@ class TerminalController {
             "workspace.remote.disconnect",
             "workspace.remote.status",
             "workspace.remote.terminal_session_end",
+            "workspace.cloud.provision",
+            "workspace.cloud.resume",
+            "workspace.cloud.stop",
+            "workspace.cloud.destroy",
+            "workspace.cloud.status",
+            "workspace.cloud.configure_token",
             "settings.open",
             "feedback.open",
             "feedback.submit",
@@ -3941,6 +3961,267 @@ class TerminalController {
         }
 
         return result
+    }
+
+    // MARK: - Cloud (fly.io) Commands
+
+    private func v2WorkspaceCloudProvision(params: [String: Any]) -> V2CallResult {
+        let requestedWorkspaceId = v2UUID(params, "workspace_id")
+        if v2HasNonNullParam(params, "workspace_id"), requestedWorkspaceId == nil {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+        let fallbackTabManager = v2ResolveTabManager(params: params)
+        let workspaceId = requestedWorkspaceId ?? fallbackTabManager?.selectedTabId
+        guard let workspaceId else {
+            return .err(code: "invalid_params", message: "Missing workspace_id", data: nil)
+        }
+        guard let appName = v2String(params, "app_name") else {
+            return .err(code: "invalid_params", message: "Missing app_name", data: nil)
+        }
+
+        // Resolve API token: param > Keychain > env
+        let token: String
+        if let paramToken = v2RawString(params, "token"), !paramToken.isEmpty {
+            token = paramToken
+        } else if let storedToken = FlyAuthTokenStore.token() {
+            token = storedToken
+        } else {
+            return .err(code: "auth_required", message: "No fly.io API token. Set FLY_API_TOKEN or call workspace.cloud.configure_token", data: nil)
+        }
+
+        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else {
+            return .err(code: "ssh_key_required", message: FlyControllerError.noSSHPublicKey.localizedDescription, data: nil)
+        }
+
+        let image = v2String(params, "image") ?? "ubuntu:24.04"
+        let cpuKind = v2String(params, "cpu_kind") ?? "shared"
+        let cpus = v2StrictInt(params, "cpus") ?? 1
+        let memoryMB = v2StrictInt(params, "memory_mb") ?? 1024
+        let region = v2RawString(params, "region")
+        let volumeName = v2RawString(params, "volume_name")
+        let volumeSizeGB = v2StrictInt(params, "volume_size_gb")
+        let sshUser = v2String(params, "ssh_user") ?? "root"
+        let machineID = v2RawString(params, "machine_id")
+
+        let spec = FlyCloudMachineSpec(
+            cpuKind: cpuKind,
+            cpus: cpus,
+            memoryMB: memoryMB,
+            image: image,
+            region: region,
+            volumeSizeGB: volumeSizeGB
+        )
+        let cloudConfig = FlyCloudConfiguration(
+            appName: appName,
+            machineSpec: spec,
+            volumeName: volumeName,
+            sshUser: sshUser,
+            resolvedMachineID: machineID
+        )
+
+        var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
+
+        v2MainSync {
+            guard let owner = AppDelegate.shared?.tabManagerFor(tabId: workspaceId),
+                  let workspace = owner.tabs.first(where: { $0.id == workspaceId }) else {
+                return
+            }
+
+            workspace.cloudConfiguration = cloudConfig
+            workspace.cloudMachineState = .creating
+            workspace.cloudMachineDetail = nil
+
+            let controller = FlyMachineController(
+                workspace: workspace,
+                configuration: cloudConfig,
+                apiToken: token,
+                sshPublicKey: sshPublicKey
+            )
+            workspace.flyMachineController = controller
+            controller.start()
+
+            let windowId = v2ResolveWindowId(tabManager: owner)
+            result = .ok([
+                "workspace_id": workspace.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "cloud": cloudStatusPayload(workspace),
+            ])
+        }
+
+        return result
+    }
+
+    private func v2WorkspaceCloudResume(params: [String: Any]) -> V2CallResult {
+        guard let workspaceId = v2UUID(params, "workspace_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+
+        let token: String
+        if let paramToken = v2RawString(params, "token"), !paramToken.isEmpty {
+            token = paramToken
+        } else if let storedToken = FlyAuthTokenStore.token() {
+            token = storedToken
+        } else {
+            return .err(code: "auth_required", message: "No fly.io API token", data: nil)
+        }
+
+        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else {
+            return .err(code: "ssh_key_required", message: FlyControllerError.noSSHPublicKey.localizedDescription, data: nil)
+        }
+
+        var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
+
+        v2MainSync {
+            guard let owner = AppDelegate.shared?.tabManagerFor(tabId: workspaceId),
+                  let workspace = owner.tabs.first(where: { $0.id == workspaceId }) else {
+                return
+            }
+            guard let cloudConfig = workspace.cloudConfiguration,
+                  cloudConfig.resolvedMachineID != nil else {
+                result = .err(code: "no_cloud_config", message: "Workspace has no cloud configuration or machine ID to resume", data: nil)
+                return
+            }
+
+            workspace.cloudMachineState = .starting
+            workspace.cloudMachineDetail = nil
+
+            let controller = FlyMachineController(
+                workspace: workspace,
+                configuration: cloudConfig,
+                apiToken: token,
+                sshPublicKey: sshPublicKey
+            )
+            workspace.flyMachineController = controller
+            controller.start()
+
+            let windowId = v2ResolveWindowId(tabManager: owner)
+            result = .ok([
+                "workspace_id": workspace.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "cloud": cloudStatusPayload(workspace),
+            ])
+        }
+
+        return result
+    }
+
+    private func v2WorkspaceCloudStop(params: [String: Any]) -> V2CallResult {
+        guard let workspaceId = v2UUID(params, "workspace_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+
+        var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
+
+        v2MainSync {
+            guard let owner = AppDelegate.shared?.tabManagerFor(tabId: workspaceId),
+                  let workspace = owner.tabs.first(where: { $0.id == workspaceId }) else {
+                return
+            }
+
+            workspace.disconnectRemoteConnection(clearConfiguration: false)
+            workspace.stopCloudMachineIfNeeded()
+
+            let windowId = v2ResolveWindowId(tabManager: owner)
+            result = .ok([
+                "workspace_id": workspace.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "cloud": cloudStatusPayload(workspace),
+            ])
+        }
+
+        return result
+    }
+
+    private func v2WorkspaceCloudDestroy(params: [String: Any]) -> V2CallResult {
+        guard let workspaceId = v2UUID(params, "workspace_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+
+        var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
+
+        v2MainSync {
+            guard let owner = AppDelegate.shared?.tabManagerFor(tabId: workspaceId),
+                  let workspace = owner.tabs.first(where: { $0.id == workspaceId }) else {
+                return
+            }
+
+            workspace.disconnectRemoteConnection(clearConfiguration: true)
+            workspace.destroyCloudMachine()
+
+            let windowId = v2ResolveWindowId(tabManager: owner)
+            result = .ok([
+                "workspace_id": workspace.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "cloud": cloudStatusPayload(workspace),
+            ])
+        }
+
+        return result
+    }
+
+    private func v2WorkspaceCloudStatus(params: [String: Any]) -> V2CallResult {
+        guard let workspaceId = v2UUID(params, "workspace_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+
+        var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
+
+        v2MainSync {
+            guard let owner = AppDelegate.shared?.tabManagerFor(tabId: workspaceId),
+                  let workspace = owner.tabs.first(where: { $0.id == workspaceId }) else {
+                return
+            }
+
+            let windowId = v2ResolveWindowId(tabManager: owner)
+            result = .ok([
+                "workspace_id": workspace.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "cloud": cloudStatusPayload(workspace),
+            ])
+        }
+
+        return result
+    }
+
+    private func v2WorkspaceCloudConfigureToken(params: [String: Any]) -> V2CallResult {
+        guard let token = v2RawString(params, "token"), !token.isEmpty else {
+            return .err(code: "invalid_params", message: "Missing token", data: nil)
+        }
+        let success = FlyAuthTokenStore.setToken(token)
+        if success {
+            return .ok(["stored": true])
+        } else {
+            return .err(code: "keychain_error", message: "Failed to store token in Keychain", data: nil)
+        }
+    }
+
+    private func cloudStatusPayload(_ workspace: Workspace) -> [String: Any] {
+        var payload: [String: Any] = [
+            "enabled": workspace.cloudConfiguration != nil,
+            "state": workspace.cloudMachineState.rawValue,
+        ]
+        if let config = workspace.cloudConfiguration {
+            payload["app_name"] = config.appName
+            payload["image"] = config.machineSpec.image
+            payload["region"] = config.machineSpec.region ?? NSNull()
+            payload["machine_id"] = config.resolvedMachineID ?? NSNull()
+            payload["volume_id"] = config.resolvedVolumeID ?? NSNull()
+            payload["ssh_user"] = config.sshUser
+        }
+        if let detail = workspace.cloudMachineDetail {
+            payload["detail"] = detail
+        }
+        return payload
     }
 
     private func v2WorkspaceAction(params: [String: Any]) -> V2CallResult {
