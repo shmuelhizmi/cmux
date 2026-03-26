@@ -14,7 +14,7 @@ struct CloudProvisioningOverlay: View {
     }
 
     private var subtitle: String {
-        workspace.cloudConfiguration?.workspaceLabel ?? workspace.cloudConfiguration?.appName ?? ""
+        workspace.cloudConfiguration?.workspaceLabel ?? ""
     }
 
     var body: some View {
@@ -80,16 +80,16 @@ struct CloudProvisioningOverlay: View {
 
     // MARK: - Step Definitions
 
-    static func steps(for state: FlyCloudMachineState) -> [ProvisioningStep] {
-        let allSteps: [(label: String, triggerState: FlyCloudMachineState)] = [
-            (String(localized: "cloud.step.creating", defaultValue: "Creating machine..."), .creating),
-            (String(localized: "cloud.step.starting", defaultValue: "Starting machine..."), .starting),
+    static func steps(for state: DaytonaCloudMachineState) -> [ProvisioningStep] {
+        let allSteps: [(label: String, triggerState: DaytonaCloudMachineState)] = [
+            (String(localized: "cloud.step.creating", defaultValue: "Creating sandbox..."), .creating),
+            (String(localized: "cloud.step.starting", defaultValue: "Starting sandbox..."), .starting),
             (String(localized: "cloud.step.ssh", defaultValue: "Establishing connection..."), .waitingForSSH),
             (String(localized: "cloud.step.cloning", defaultValue: "Cloning repository..."), .cloningRepository),
             (String(localized: "cloud.step.ready", defaultValue: "Finalizing setup..."), .ready),
         ]
 
-        let stateOrder: [FlyCloudMachineState] = [
+        let stateOrder: [DaytonaCloudMachineState] = [
             .creating, .starting, .waitingForSSH, .cloningRepository, .ready,
         ]
         let currentIndex = stateOrder.firstIndex(of: state) ?? (state == .error ? stateOrder.count : -1)

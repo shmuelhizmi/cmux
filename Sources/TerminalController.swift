@@ -2113,7 +2113,7 @@ class TerminalController {
         case "workspace.remote.terminal_session_end":
             return v2Result(id: id, self.v2WorkspaceRemoteTerminalSessionEnd(params: params))
 
-        // Cloud (fly.io)
+        // Cloud (Daytona)
         case "workspace.cloud.provision":
             return v2Result(id: id, self.v2WorkspaceCloudProvision(params: params))
         case "workspace.cloud.resume":
@@ -3994,7 +3994,7 @@ class TerminalController {
         return result
     }
 
-    // MARK: - Cloud (fly.io) Commands
+    // MARK: - Cloud (Daytona) Commands
 
     private func v2WorkspaceCloudProvision(params: [String: Any]) -> V2CallResult {
         let requestedWorkspaceId = v2UUID(params, "workspace_id")
@@ -4006,52 +4006,42 @@ class TerminalController {
         guard let workspaceId else {
             return .err(code: "invalid_params", message: "Missing workspace_id", data: nil)
         }
-        guard let appName = v2String(params, "app_name") else {
-            return .err(code: "invalid_params", message: "Missing app_name", data: nil)
-        }
 
         // Resolve API token: param > Keychain > env
         let token: String
         if let paramToken = v2RawString(params, "token"), !paramToken.isEmpty {
             token = paramToken
-        } else if let storedToken = FlyAuthTokenStore.token() {
+        } else if let storedToken = DaytonaAuthTokenStore.token() {
             token = storedToken
         } else {
-            return .err(code: "auth_required", message: "No fly.io API token. Set FLY_API_TOKEN or call workspace.cloud.configure_token", data: nil)
+            return .err(code: "auth_required", message: "No Daytona API key. Set DAYTONA_API_KEY or call workspace.cloud.configure_token", data: nil)
         }
 
-        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else {
-            return .err(code: "ssh_key_required", message: FlyControllerError.noSSHPublicKey.localizedDescription, data: nil)
-        }
-
-        let image = v2String(params, "image") ?? "ubuntu:24.04"
-        let cpuKind = v2String(params, "cpu_kind") ?? "shared"
-        let cpus = v2StrictInt(params, "cpus") ?? 1
-        let memoryMB = v2StrictInt(params, "memory_mb") ?? 1024
+        let cpu = v2StrictInt(params, "cpu") ?? 1
+        let memory = v2StrictInt(params, "memory") ?? 1
+        let disk = v2StrictInt(params, "disk") ?? 10
+        let snapshot = v2RawString(params, "snapshot") ?? "daytona-small"
         let region = v2RawString(params, "region")
-        let volumeName = v2RawString(params, "volume_name")
-        let volumeSizeGB = v2StrictInt(params, "volume_size_gb")
-        let sshUser = v2String(params, "ssh_user") ?? "root"
-        let machineID = v2RawString(params, "machine_id")
+        let language = v2RawString(params, "language")
+        let sandboxID = v2RawString(params, "sandbox_id")
         let gitSetupScript = v2RawString(params, "git_setup_script")
         let workspaceLabel = v2RawString(params, "workspace_label")
+        let autoStopInterval = v2StrictInt(params, "auto_stop_interval")
 
-        let spec = FlyCloudMachineSpec(
-            cpuKind: cpuKind,
-            cpus: cpus,
-            memoryMB: memoryMB,
-            image: image,
+        let spec = DaytonaCloudSandboxSpec(
+            cpu: cpu,
+            memory: memory,
+            disk: disk,
+            snapshot: snapshot,
             region: region,
-            volumeSizeGB: volumeSizeGB
+            language: language
         )
-        let cloudConfig = FlyCloudConfiguration(
-            appName: appName,
-            machineSpec: spec,
-            volumeName: volumeName,
-            sshUser: sshUser,
+        let cloudConfig = DaytonaCloudConfiguration(
+            sandboxSpec: spec,
             gitSetupScript: gitSetupScript,
             workspaceLabel: workspaceLabel,
-            resolvedMachineID: machineID
+            resolvedSandboxID: sandboxID,
+            autoStopInterval: autoStopInterval
         )
 
         var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
@@ -4066,13 +4056,12 @@ class TerminalController {
             workspace.cloudMachineState = .creating
             workspace.cloudMachineDetail = nil
 
-            let controller = FlyMachineController(
+            let controller = DaytonaSandboxController(
                 workspace: workspace,
                 configuration: cloudConfig,
-                apiToken: token,
-                sshPublicKey: sshPublicKey
+                apiToken: token
             )
-            workspace.flyMachineController = controller
+            workspace.sandboxController = controller
             controller.start()
 
             let windowId = v2ResolveWindowId(tabManager: owner)
@@ -4096,14 +4085,10 @@ class TerminalController {
         let token: String
         if let paramToken = v2RawString(params, "token"), !paramToken.isEmpty {
             token = paramToken
-        } else if let storedToken = FlyAuthTokenStore.token() {
+        } else if let storedToken = DaytonaAuthTokenStore.token() {
             token = storedToken
         } else {
-            return .err(code: "auth_required", message: "No fly.io API token", data: nil)
-        }
-
-        guard let sshPublicKey = FlyMachineController.readDefaultSSHPublicKey() else {
-            return .err(code: "ssh_key_required", message: FlyControllerError.noSSHPublicKey.localizedDescription, data: nil)
+            return .err(code: "auth_required", message: "No Daytona API key", data: nil)
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)
@@ -4114,21 +4099,20 @@ class TerminalController {
                 return
             }
             guard let cloudConfig = workspace.cloudConfiguration,
-                  cloudConfig.resolvedMachineID != nil else {
-                result = .err(code: "no_cloud_config", message: "Workspace has no cloud configuration or machine ID to resume", data: nil)
+                  cloudConfig.resolvedSandboxID != nil else {
+                result = .err(code: "no_cloud_config", message: "Workspace has no cloud configuration or sandbox ID to resume", data: nil)
                 return
             }
 
             workspace.cloudMachineState = .starting
             workspace.cloudMachineDetail = nil
 
-            let controller = FlyMachineController(
+            let controller = DaytonaSandboxController(
                 workspace: workspace,
                 configuration: cloudConfig,
-                apiToken: token,
-                sshPublicKey: sshPublicKey
+                apiToken: token
             )
-            workspace.flyMachineController = controller
+            workspace.sandboxController = controller
             controller.start()
 
             let windowId = v2ResolveWindowId(tabManager: owner)
@@ -4232,11 +4216,11 @@ class TerminalController {
         guard let token = v2RawString(params, "token"), !token.isEmpty else {
             return .err(code: "invalid_params", message: "Missing token", data: nil)
         }
-        let success = FlyAuthTokenStore.setToken(token)
+        let success = DaytonaAuthTokenStore.setToken(token)
         if success {
             return .ok(["stored": true])
         } else {
-            return .err(code: "keychain_error", message: "Failed to store token in Keychain", data: nil)
+            return .err(code: "keychain_error", message: "Failed to store API key in Keychain", data: nil)
         }
     }
 
@@ -4246,12 +4230,12 @@ class TerminalController {
             "state": workspace.cloudMachineState.rawValue,
         ]
         if let config = workspace.cloudConfiguration {
-            payload["app_name"] = config.appName
-            payload["image"] = config.machineSpec.image
-            payload["region"] = config.machineSpec.region ?? NSNull()
-            payload["machine_id"] = config.resolvedMachineID ?? NSNull()
-            payload["volume_id"] = config.resolvedVolumeID ?? NSNull()
-            payload["ssh_user"] = config.sshUser
+            payload["snapshot"] = config.sandboxSpec.snapshot ?? NSNull()
+            payload["cpu"] = config.sandboxSpec.cpu
+            payload["memory"] = config.sandboxSpec.memory
+            payload["disk"] = config.sandboxSpec.disk
+            payload["region"] = config.sandboxSpec.region ?? NSNull()
+            payload["sandbox_id"] = config.resolvedSandboxID ?? NSNull()
         }
         if let detail = workspace.cloudMachineDetail {
             payload["detail"] = detail

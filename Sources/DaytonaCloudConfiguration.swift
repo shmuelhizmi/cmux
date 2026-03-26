@@ -1,69 +1,61 @@
 import Foundation
 
-// MARK: - Machine Spec
+// MARK: - Sandbox Spec
 
-struct FlyCloudMachineSpec: Codable, Equatable, Sendable {
-    let cpuKind: String
-    let cpus: Int
-    let memoryMB: Int
-    let image: String
+struct DaytonaCloudSandboxSpec: Codable, Equatable, Sendable {
+    let cpu: Int
+    let memory: Int
+    let disk: Int
+    let snapshot: String?
     let region: String?
-    let volumeSizeGB: Int?
+    let language: String?
 
-    static let `default` = FlyCloudMachineSpec(
-        cpuKind: "shared",
-        cpus: 1,
-        memoryMB: 1024,
-        image: "ubuntu:24.04",
+    static let `default` = DaytonaCloudSandboxSpec(
+        cpu: 1,
+        memory: 1,
+        disk: 10,
+        snapshot: "daytona-small",
         region: nil,
-        volumeSizeGB: nil
+        language: nil
     )
 }
 
 // MARK: - Cloud Configuration
 
-struct FlyCloudConfiguration: Codable, Equatable, Sendable {
-    let appName: String
-    let machineSpec: FlyCloudMachineSpec
-    let volumeName: String?
-    let sshUser: String
+struct DaytonaCloudConfiguration: Codable, Equatable, Sendable {
+    let sandboxSpec: DaytonaCloudSandboxSpec
 
-    /// Shell script to run on the machine after SSH is ready (e.g. git clone + checkout).
+    /// Shell script to run on the sandbox after SSH is ready (e.g. git clone + checkout).
     /// Passed as `terminalStartupCommand` so the user sees output in the terminal.
     var gitSetupScript: String?
 
     /// Human-readable label for the workspace (e.g. branch name or PR title).
     var workspaceLabel: String?
 
-    /// Populated after machine creation
-    var resolvedMachineID: String?
-    /// Populated after volume creation
-    var resolvedVolumeID: String?
+    /// Populated after sandbox creation
+    var resolvedSandboxID: String?
+
+    /// Auto-stop interval in minutes (0 = never).
+    var autoStopInterval: Int?
 
     init(
-        appName: String,
-        machineSpec: FlyCloudMachineSpec = .default,
-        volumeName: String? = nil,
-        sshUser: String = "root",
+        sandboxSpec: DaytonaCloudSandboxSpec = .default,
         gitSetupScript: String? = nil,
         workspaceLabel: String? = nil,
-        resolvedMachineID: String? = nil,
-        resolvedVolumeID: String? = nil
+        resolvedSandboxID: String? = nil,
+        autoStopInterval: Int? = nil
     ) {
-        self.appName = appName
-        self.machineSpec = machineSpec
-        self.volumeName = volumeName
-        self.sshUser = sshUser
+        self.sandboxSpec = sandboxSpec
         self.gitSetupScript = gitSetupScript
         self.workspaceLabel = workspaceLabel
-        self.resolvedMachineID = resolvedMachineID
-        self.resolvedVolumeID = resolvedVolumeID
+        self.resolvedSandboxID = resolvedSandboxID
+        self.autoStopInterval = autoStopInterval
     }
 }
 
 // MARK: - Machine State
 
-enum FlyCloudMachineState: String, Codable, Sendable {
+enum DaytonaCloudMachineState: String, Codable, Sendable {
     case creating
     case starting
     case waitingForSSH
@@ -76,35 +68,10 @@ enum FlyCloudMachineState: String, Codable, Sendable {
     case error
 }
 
-// MARK: - SSH Bootstrap
-
-extension FlyCloudConfiguration {
-    /// Shell script used as the machine's init command.
-    /// Installs sshd, injects the user's public key, and starts sshd in the foreground.
-    /// Shell script for machine init. The SSH public key is embedded directly.
-    static func machineInitScript(sshPublicKey: String, sshUser: String) -> String {
-        let home = sshUser == "root" ? "/root" : "/home/\(sshUser)"
-        // Base64-encode the pubkey to avoid any shell escaping issues
-        let b64Key = Data(sshPublicKey.utf8).base64EncodedString()
-        return [
-            "apt-get update -qq",
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server >/dev/null 2>&1",
-            "mkdir -p \(home)/.ssh /run/sshd",
-            "echo \(b64Key) | base64 -d > \(home)/.ssh/authorized_keys",
-            "chmod 700 \(home)/.ssh",
-            "chmod 600 \(home)/.ssh/authorized_keys",
-            "ssh-keygen -A",
-            "mkdir -p /etc/ssh/sshd_config.d",
-            "printf 'PermitRootLogin yes\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-cmux.conf",
-            "/usr/sbin/sshd -D -e",
-        ].joined(separator: " && ")
-    }
-}
-
 // MARK: - Git Setup Scripts
 
-extension FlyCloudConfiguration {
-    /// Builds a shell script that clones a repo and checks out the right branch/PR on the fly machine.
+extension DaytonaCloudConfiguration {
+    /// Builds a shell script that clones a repo and checks out the right branch/PR on the sandbox.
     static func buildGitSetupScript(
         mode: String,
         repoURL: String,
@@ -133,8 +100,8 @@ extension FlyCloudConfiguration {
             set -e
             \(installGit)
             echo "Cloning \(shellEscape(repoURL))..."
-            git clone --branch \(shellEscape(base)) \(shellEscape(repoURL)) /workspace/repo
-            cd /workspace/repo
+            git clone --branch \(shellEscape(base)) \(shellEscape(repoURL)) /home/daytona/repo
+            cd /home/daytona/repo
             git checkout -b \(shellEscape(newBranch))
             echo "Created branch \(shellEscape(newBranch)) from \(shellEscape(base))"
             """
@@ -145,8 +112,8 @@ extension FlyCloudConfiguration {
             set -e
             \(installGit)
             echo "Cloning \(shellEscape(repoURL)) (branch: \(shellEscape(branch)))..."
-            git clone --branch \(shellEscape(branch)) \(shellEscape(repoURL)) /workspace/repo
-            cd /workspace/repo
+            git clone --branch \(shellEscape(branch)) \(shellEscape(repoURL)) /home/daytona/repo
+            cd /home/daytona/repo
             echo "Ready on branch \(shellEscape(branch))"
             """
 
@@ -157,8 +124,8 @@ extension FlyCloudConfiguration {
             set -e
             \(installGit)
             echo "Cloning \(shellEscape(repoURL))..."
-            git clone \(shellEscape(repoURL)) /workspace/repo
-            cd /workspace/repo
+            git clone \(shellEscape(repoURL)) /home/daytona/repo
+            cd /home/daytona/repo
             if command -v gh >/dev/null 2>&1; then
                 gh pr checkout \(num)\(slug.isEmpty ? "" : " --repo \(shellEscape(slug))")
             else

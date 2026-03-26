@@ -63,7 +63,7 @@ enum CloudWorkspaceItem: Identifiable, Equatable {
 
 struct NewCloudWorkspaceSheet: View {
     var currentDirectory: String?
-    var onSubmit: (FlyCloudConfiguration, String?) -> Void
+    var onSubmit: (DaytonaCloudConfiguration, String?) -> Void
     var onLocalWorkspace: () -> Void
     var onDismiss: (() -> Void)?
     var externalError: String?
@@ -75,7 +75,6 @@ struct NewCloudWorkspaceSheet: View {
     @State private var detectedRepoSlug: String?
     @State private var detectedRepoURL: String?
     @State private var detectedHead: String?
-    @State private var flyAppName: String = ""
     @State private var showCreateBranchInput: Bool = false
     @State private var newBranchName: String = ""
     @State private var newBranchBase: String = "main"
@@ -406,12 +405,12 @@ struct NewCloudWorkspaceSheet: View {
 #endif
             return
         }
-        let script = FlyCloudConfiguration.buildGitSetupScript(
+        let script = DaytonaCloudConfiguration.buildGitSetupScript(
             mode: "import_branch", repoURL: repoURL, branchName: name
         )
         let config = buildConfig(gitSetupScript: script)
 #if DEBUG
-        dlog("cloud.modal.submitBranch calling onSubmit appName=\(config.appName)")
+        dlog("cloud.modal.submitBranch calling onSubmit appName=\(config.sandboxSpec.snapshot ?? "default")")
 #endif
         onSubmit(config, name)
     }
@@ -426,13 +425,13 @@ struct NewCloudWorkspaceSheet: View {
 #endif
             return
         }
-        let script = FlyCloudConfiguration.buildGitSetupScript(
+        let script = DaytonaCloudConfiguration.buildGitSetupScript(
             mode: "import_pr", repoURL: repoURL, prNumber: number, repoSlug: repoSlug
         )
         let label = "#\(number) \(title)"
         let config = buildConfig(gitSetupScript: script)
 #if DEBUG
-        dlog("cloud.modal.submitPR calling onSubmit appName=\(config.appName)")
+        dlog("cloud.modal.submitPR calling onSubmit appName=\(config.sandboxSpec.snapshot ?? "default")")
 #endif
         onSubmit(config, label)
     }
@@ -442,7 +441,7 @@ struct NewCloudWorkspaceSheet: View {
         guard !name.isEmpty else { return }
         guard let repoURL = effectiveRepoURL() else { return }
         let base = newBranchBase.trimmingCharacters(in: .whitespacesAndNewlines)
-        let script = FlyCloudConfiguration.buildGitSetupScript(
+        let script = DaytonaCloudConfiguration.buildGitSetupScript(
             mode: "create_branch", repoURL: repoURL,
             baseBranch: base.isEmpty ? "main" : base,
             newBranchName: name
@@ -460,23 +459,9 @@ struct NewCloudWorkspaceSheet: View {
         return nil
     }
 
-    /// Sanitize for fly.io app names: lowercase alphanumeric and dashes, max 63 chars.
-    private static func sanitizeFlyAppName(_ raw: String) -> String {
-        let lowered = raw.lowercased()
-        let cleaned = String(lowered.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" })
-        let trimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return String(trimmed.prefix(63))
-    }
-
-    private func buildConfig(gitSetupScript: String) -> FlyCloudConfiguration {
-        let app = flyAppName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawName = app.isEmpty ? (detectedRepoSlug?.replacingOccurrences(of: "/", with: "-") ?? "dev") : app
-        let appName = Self.sanitizeFlyAppName(rawName)
-        return FlyCloudConfiguration(
-            appName: appName,
-            machineSpec: .default,
-            volumeName: "workspace_data",
-            sshUser: "root",
+    private func buildConfig(gitSetupScript: String) -> DaytonaCloudConfiguration {
+        DaytonaCloudConfiguration(
+            sandboxSpec: .default,
             gitSetupScript: gitSetupScript
         )
     }

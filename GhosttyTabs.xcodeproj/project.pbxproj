@@ -9,10 +9,10 @@
 		/* Begin PBXBuildFile section */
 		F1A00006A1B2C3D4E5F60719 /* CloudProvisioningOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00016A1B2C3D4E5F60719 /* CloudProvisioningOverlay.swift */; };
 		F1A00005A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00015A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift */; };
-		F1A00001A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00011A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift */; };
-		F1A00002A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00012A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift */; };
-		F1A00003A1B2C3D4E5F60719 /* FlyMachinesAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00013A1B2C3D4E5F60719 /* FlyMachinesAPI.swift */; };
-		F1A00004A1B2C3D4E5F60719 /* FlyMachineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00014A1B2C3D4E5F60719 /* FlyMachineController.swift */; };
+		F1A00001A1B2C3D4E5F60719 /* DaytonaCloudConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00011A1B2C3D4E5F60719 /* DaytonaCloudConfiguration.swift */; };
+		F1A00002A1B2C3D4E5F60719 /* DaytonaAuthTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00012A1B2C3D4E5F60719 /* DaytonaAuthTokenStore.swift */; };
+		F1A00003A1B2C3D4E5F60719 /* DaytonaAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00013A1B2C3D4E5F60719 /* DaytonaAPI.swift */; };
+		F1A00004A1B2C3D4E5F60719 /* DaytonaSandboxController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00014A1B2C3D4E5F60719 /* DaytonaSandboxController.swift */; };
 			A5001001 /* cmuxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001011 /* cmuxApp.swift */; };
 			A5001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001012 /* ContentView.swift */; };
 			E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */; };
@@ -189,10 +189,10 @@
 		/* Begin PBXFileReference section */
 		F1A00016A1B2C3D4E5F60719 /* CloudProvisioningOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProvisioningOverlay.swift; sourceTree = "<group>"; };
 		F1A00015A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewCloudWorkspaceSheet.swift; sourceTree = "<group>"; };
-		F1A00011A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyCloudConfiguration.swift; sourceTree = "<group>"; };
-		F1A00012A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyAuthTokenStore.swift; sourceTree = "<group>"; };
-		F1A00013A1B2C3D4E5F60719 /* FlyMachinesAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyMachinesAPI.swift; sourceTree = "<group>"; };
-		F1A00014A1B2C3D4E5F60719 /* FlyMachineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyMachineController.swift; sourceTree = "<group>"; };
+		F1A00011A1B2C3D4E5F60719 /* DaytonaCloudConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaytonaCloudConfiguration.swift; sourceTree = "<group>"; };
+		F1A00012A1B2C3D4E5F60719 /* DaytonaAuthTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaytonaAuthTokenStore.swift; sourceTree = "<group>"; };
+		F1A00013A1B2C3D4E5F60719 /* DaytonaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaytonaAPI.swift; sourceTree = "<group>"; };
+		F1A00014A1B2C3D4E5F60719 /* DaytonaSandboxController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaytonaSandboxController.swift; sourceTree = "<group>"; };
 			A5001000 /* cmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
 			F1000002A1B2C3D4E5F60718 /* cmuxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cmuxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 			7E7E6EF344A568AC7FEE3715 /* cmuxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cmuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -486,10 +486,10 @@
 				A5001655 /* CmuxDirectoryTrust.swift */,
 				F1A00016A1B2C3D4E5F60719 /* CloudProvisioningOverlay.swift */,
 				F1A00015A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift */,
-				F1A00011A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift */,
-				F1A00012A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift */,
-				F1A00013A1B2C3D4E5F60719 /* FlyMachinesAPI.swift */,
-				F1A00014A1B2C3D4E5F60719 /* FlyMachineController.swift */,
+				F1A00011A1B2C3D4E5F60719 /* DaytonaCloudConfiguration.swift */,
+				F1A00012A1B2C3D4E5F60719 /* DaytonaAuthTokenStore.swift */,
+				F1A00013A1B2C3D4E5F60719 /* DaytonaAPI.swift */,
+				F1A00014A1B2C3D4E5F60719 /* DaytonaSandboxController.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -792,10 +792,10 @@
 				A5001654 /* CmuxDirectoryTrust.swift in Sources */,
 				F1A00006A1B2C3D4E5F60719 /* CloudProvisioningOverlay.swift in Sources */,
 				F1A00005A1B2C3D4E5F60719 /* NewCloudWorkspaceSheet.swift in Sources */,
-				F1A00001A1B2C3D4E5F60719 /* FlyCloudConfiguration.swift in Sources */,
-				F1A00002A1B2C3D4E5F60719 /* FlyAuthTokenStore.swift in Sources */,
-				F1A00003A1B2C3D4E5F60719 /* FlyMachinesAPI.swift in Sources */,
-				F1A00004A1B2C3D4E5F60719 /* FlyMachineController.swift in Sources */,
+				F1A00001A1B2C3D4E5F60719 /* DaytonaCloudConfiguration.swift in Sources */,
+				F1A00002A1B2C3D4E5F60719 /* DaytonaAuthTokenStore.swift in Sources */,
+				F1A00003A1B2C3D4E5F60719 /* DaytonaAPI.swift in Sources */,
+				F1A00004A1B2C3D4E5F60719 /* DaytonaSandboxController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -4328,7 +4328,7 @@ struct CMUXCLI {
         ])
     }
 
-    // MARK: - Cloud (fly.io) Commands
+    // MARK: - Cloud (Daytona) Commands
 
     private func runCloud(
         commandArgs: [String],
@@ -4336,26 +4336,19 @@ struct CMUXCLI {
         jsonOutput: Bool,
         idFormat: CLIIDFormat
     ) throws {
-        let (appOpt, rem0) = parseOption(commandArgs, name: "--app")
-        let (imageOpt, rem1) = parseOption(rem0, name: "--image")
-        let (cpusOpt, rem2) = parseOption(rem1, name: "--cpus")
-        let (memoryOpt, rem3) = parseOption(rem2, name: "--memory")
-        let (cpuKindOpt, rem4) = parseOption(rem3, name: "--cpu-kind")
-        let (regionOpt, rem5) = parseOption(rem4, name: "--region")
-        let (volumeOpt, rem6) = parseOption(rem5, name: "--volume")
-        let (volumeSizeOpt, rem7) = parseOption(rem6, name: "--volume-size")
-        let (nameOpt, rem8) = parseOption(rem7, name: "--name")
-        let (userOpt, rem9) = parseOption(rem8, name: "--user")
-        let (machineOpt, rem10) = parseOption(rem9, name: "--machine")
-        let (tokenOpt, remaining) = parseOption(rem10, name: "--token")
+        let (snapshotOpt, rem0) = parseOption(commandArgs, name: "--snapshot")
+        let (cpusOpt, rem1) = parseOption(rem0, name: "--cpus")
+        let (memoryOpt, rem2) = parseOption(rem1, name: "--memory")
+        let (diskOpt, rem3) = parseOption(rem2, name: "--disk")
+        let (regionOpt, rem4) = parseOption(rem3, name: "--region")
+        let (languageOpt, rem5) = parseOption(rem4, name: "--language")
+        let (nameOpt, rem6) = parseOption(rem5, name: "--name")
+        let (sandboxOpt, rem7) = parseOption(rem6, name: "--sandbox")
+        let (tokenOpt, rem8) = parseOption(rem7, name: "--token")
+        let (autoStopOpt, remaining) = parseOption(rem8, name: "--auto-stop")
 
         if let unknown = remaining.first(where: { $0.hasPrefix("--") }) {
             throw CLIError(message: "cloud: unknown flag '\(unknown)'. Run 'cmux cloud --help' for usage.")
-        }
-
-        let appName = appOpt ?? ProcessInfo.processInfo.environment["FLY_APP"]
-        guard let appName, !appName.isEmpty else {
-            throw CLIError(message: "cloud: --app is required (or set FLY_APP environment variable)")
         }
 
         // Create workspace
@@ -4372,21 +4365,19 @@ struct CMUXCLI {
             ])
         }
 
-        // Provision cloud machine
+        // Provision cloud sandbox
         var provisionParams: [String: Any] = [
             "workspace_id": workspaceId,
-            "app_name": appName,
         ]
-        if let imageOpt { provisionParams["image"] = imageOpt }
-        if let cpusOpt, let cpus = Int(cpusOpt) { provisionParams["cpus"] = cpus }
-        if let memoryOpt, let mem = Int(memoryOpt) { provisionParams["memory_mb"] = mem }
-        if let cpuKindOpt { provisionParams["cpu_kind"] = cpuKindOpt }
+        if let snapshotOpt { provisionParams["snapshot"] = snapshotOpt }
+        if let cpusOpt, let cpus = Int(cpusOpt) { provisionParams["cpu"] = cpus }
+        if let memoryOpt, let mem = Int(memoryOpt) { provisionParams["memory"] = mem }
+        if let diskOpt, let disk = Int(diskOpt) { provisionParams["disk"] = disk }
         if let regionOpt { provisionParams["region"] = regionOpt }
-        if let volumeOpt { provisionParams["volume_name"] = volumeOpt }
-        if let volumeSizeOpt, let size = Int(volumeSizeOpt) { provisionParams["volume_size_gb"] = size }
-        if let userOpt { provisionParams["ssh_user"] = userOpt }
-        if let machineOpt { provisionParams["machine_id"] = machineOpt }
+        if let languageOpt { provisionParams["language"] = languageOpt }
+        if let sandboxOpt { provisionParams["sandbox_id"] = sandboxOpt }
         if let tokenOpt { provisionParams["token"] = tokenOpt }
+        if let autoStopOpt, let interval = Int(autoStopOpt) { provisionParams["auto_stop_interval"] = interval }
 
         let provision = try client.sendV2(method: "workspace.cloud.provision", params: provisionParams)
 
@@ -4401,9 +4392,9 @@ struct CMUXCLI {
             print("Cloud workspace created: \(workspaceId)")
             if let cloud = provision["cloud"] as? [String: Any],
                let state = cloud["state"] as? String {
-                print("Machine state: \(state)")
-                if let machineId = cloud["machine_id"] as? String {
-                    print("Machine ID: \(machineId)")
+                print("Sandbox state: \(state)")
+                if let sandboxId = cloud["sandbox_id"] as? String {
+                    print("Sandbox ID: \(sandboxId)")
                 }
             }
         }
@@ -4460,13 +4451,11 @@ struct CMUXCLI {
             print(jsonString(result))
         } else if let cloud = result["cloud"] as? [String: Any] {
             let state = cloud["state"] as? String ?? "unknown"
-            let app = cloud["app_name"] as? String ?? "unknown"
-            let image = cloud["image"] as? String ?? "unknown"
-            let machineId = (cloud["machine_id"] as? String) ?? "none"
-            print("App: \(app)")
-            print("Image: \(image)")
+            let snapshot = cloud["snapshot"] as? String ?? "unknown"
+            let sandboxId = (cloud["sandbox_id"] as? String) ?? "none"
+            print("Snapshot: \(snapshot)")
             print("State: \(state)")
-            print("Machine ID: \(machineId)")
+            print("Sandbox ID: \(sandboxId)")
             if let detail = cloud["detail"] as? String {
                 print("Detail: \(detail)")
             }
@@ -6536,34 +6525,32 @@ struct CMUXCLI {
             return """
             Usage: cmux cloud [flags]
 
-            Create a new workspace backed by a fly.io machine (dev container).
-            Provisions the machine, waits for SSH access, and connects automatically.
+            Create a new workspace backed by a Daytona sandbox.
+            Provisions the sandbox, waits for SSH access, and connects automatically.
 
             Flags:
-              --app <name>            Fly.io app name (required, or FLY_APP env)
-              --image <image>         Docker image (default: ubuntu:24.04)
+              --snapshot <name>       Daytona snapshot (default: daytona-small)
               --cpus <n>              CPU count (default: 1)
-              --memory <mb>           Memory in MB (default: 1024)
-              --cpu-kind <kind>       CPU kind: shared or performance (default: shared)
-              --region <code>         Fly.io region (default: auto)
-              --volume <name>         Persistent volume name (creates if needed)
-              --volume-size <gb>      Volume size in GB (default: 10, for new volumes)
+              --memory <gb>           Memory in GB (default: 1)
+              --disk <gb>             Disk size in GB (default: 10)
+              --region <code>         Region: us or eu (default: auto)
+              --language <lang>       Language runtime (default: none)
               --name <title>          Workspace title
-              --user <name>           SSH user (default: root)
-              --machine <id>          Resume a specific stopped machine
-              --token <token>         Fly.io API token (or FLY_API_TOKEN env)
+              --sandbox <id>          Resume a specific stopped sandbox
+              --token <token>         Daytona API key (or DAYTONA_API_KEY env)
+              --auto-stop <minutes>   Auto-stop after N minutes of inactivity (default: none)
 
             Example:
-              cmux cloud --app my-dev --image ubuntu:24.04
-              cmux cloud --app my-dev --machine 3287dd4e965e86
-              cmux cloud --app my-dev --image node:20 --cpus 4 --memory 4096 --volume ws-data
+              cmux cloud
+              cmux cloud --snapshot daytona-medium --cpus 2 --memory 4
+              cmux cloud --sandbox abc123
             """
         case "cloud-stop":
             return """
             Usage: cmux cloud-stop [--workspace <id>]
 
-            Stop the fly.io machine for a cloud workspace. The machine is stopped (not destroyed),
-            preserving its state for fast resume (<1s). Stopped machines cost only volume storage.
+            Stop the Daytona sandbox for a cloud workspace. The sandbox is stopped (not destroyed),
+            preserving its state for fast resume.
 
             Flags:
               --workspace <id>   Target workspace (default: current)
@@ -6572,8 +6559,8 @@ struct CMUXCLI {
             return """
             Usage: cmux cloud-destroy [--workspace <id>]
 
-            Permanently destroy the fly.io machine for a cloud workspace.
-            This is irreversible — all non-volume data is lost.
+            Permanently delete the Daytona sandbox for a cloud workspace.
+            This is irreversible — all data is lost.
 
             Flags:
               --workspace <id>   Target workspace (default: current)
@@ -6582,7 +6569,7 @@ struct CMUXCLI {
             return """
             Usage: cmux cloud-status [--workspace <id>]
 
-            Show the status of the fly.io machine for a cloud workspace.
+            Show the status of the Daytona sandbox for a cloud workspace.
 
             Flags:
               --workspace <id>   Target workspace (default: current)
