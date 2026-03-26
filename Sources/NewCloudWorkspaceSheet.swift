@@ -475,7 +475,7 @@ struct NewCloudWorkspaceSheet: View {
         return FlyCloudConfiguration(
             appName: appName,
             machineSpec: .default,
-            volumeName: "workspace-data",
+            volumeName: "workspace_data",
             sshUser: "root",
             gitSetupScript: gitSetupScript
         )
