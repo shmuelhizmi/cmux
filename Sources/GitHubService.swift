@@ -1,4 +1,7 @@
 import Foundation
+#if DEBUG
+import Bonsplit
+#endif
 
 /// Encapsulates all GitHub CLI (`gh`) interactions for pull request data.
 ///
@@ -189,14 +192,9 @@ enum GitHubService {
         }
 
 #if DEBUG
-        dlog(
-            "github.pr.success dir=\(directory) branch=\(branch) " +
-            "repo=\(repoSlug) number=\(pullRequest.number) state=\(status.rawValue) " +
-            "checks=\(checksResult.status?.rawValue ?? "none") " +
-            "additions=\(pullRequest.additions.map(String.init) ?? "nil") " +
-            "deletions=\(pullRequest.deletions.map(String.init) ?? "nil") " +
-            "review=\(reviewDecision?.rawValue ?? "nil")"
-        )
+        let prDebugMsg = "github.pr.success dir=\(directory) branch=\(branch) repo=\(repoSlug) number=\(pullRequest.number) state=\(status.rawValue)"
+        let prDebugDetail = "checks=\(checksResult.status?.rawValue ?? "none") review=\(reviewDecision?.rawValue ?? "nil")"
+        dlog("\(prDebugMsg) \(prDebugDetail)")
 #endif
         return .resolved(
             PullRequestInfo(

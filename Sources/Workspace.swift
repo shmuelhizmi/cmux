@@ -5807,8 +5807,8 @@ final class Workspace: Identifiable, ObservableObject {
     deinit {
         activeRemoteSessionControllerID = nil
         remoteSessionController?.stop()
-        flyMachineController?.stop()
-        flyMachineController = nil
+        // FlyMachineController cleanup is handled by stopCloudMachineIfNeeded() in
+        // TabManager.closeWorkspace() before the workspace is deallocated.
     }
 
     func refreshSplitButtonTooltips() {

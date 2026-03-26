@@ -30,7 +30,9 @@ final class FlyMachineController {
 
     deinit {
         provisioningTask?.cancel()
-        killProxyProcess()
+        if let process = proxyProcess, process.isRunning {
+            process.terminate()
+        }
     }
 
     // MARK: - Public Lifecycle
@@ -270,9 +272,8 @@ final class FlyMachineController {
         defer { close(socketFD) }
 
         // Set non-blocking
-        var flags = fcntl(socketFD, F_GETFL, 0)
-        flags |= O_NONBLOCK
-        fcntl(socketFD, F_SETFL, flags)
+        let flags = fcntl(socketFD, F_GETFL, 0)
+        _ = fcntl(socketFD, F_SETFL, flags | O_NONBLOCK)
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -288,12 +289,10 @@ final class FlyMachineController {
         if result == 0 { return true }
         guard errno == EINPROGRESS else { return false }
 
-        var writeSet = fd_set()
-        __darwin_fd_zero(&writeSet)
-        __darwin_fd_set(socketFD, &writeSet)
-        var timeout = timeval(tv_sec: __darwin_time_t(timeoutSeconds), tv_usec: 0)
-        let selectResult = select(socketFD + 1, nil, &writeSet, nil, &timeout)
-        guard selectResult > 0 else { return false }
+        // Use poll() instead of select() — avoids fd_set portability issues
+        var pfd = pollfd(fd: socketFD, events: Int16(POLLOUT), revents: 0)
+        let pollResult = poll(&pfd, 1, Int32(timeoutSeconds * 1000))
+        guard pollResult > 0, pfd.revents & Int16(POLLOUT) != 0 else { return false }
 
         var error: Int32 = 0
         var errorLen = socklen_t(MemoryLayout<Int32>.size)
