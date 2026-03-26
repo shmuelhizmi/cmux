@@ -191,14 +191,15 @@ struct NewCloudWorkspaceSheet: View {
         }
     }
 
-    // MARK: - Event Monitors (keyboard + click-outside-dismiss)
+    // MARK: - Keyboard Event Monitor
 
     private static let kVKDownArrow: UInt16 = 0x7D
     private static let kVKUpArrow: UInt16 = 0x7E
     private static let kVKEscape: UInt16 = 0x35
+    private static let kVKReturn: UInt16 = 0x24
+    private static let kVKKeypadEnter: UInt16 = 0x4C
 
     @State private var keyMonitor: Any?
-    @State private var mouseMonitor: Any?
 
     private func installKeyMonitor() {
         removeKeyMonitor()
@@ -212,6 +213,9 @@ struct NewCloudWorkspaceSheet: View {
                 let items = filteredItems
                 if !items.isEmpty { selectedIndex = max(selectedIndex - 1, 0) }
                 return nil
+            case Self.kVKReturn, Self.kVKKeypadEnter:
+                selectCurrentItem()
+                return nil
             case Self.kVKEscape:
                 onDismiss?()
                 return nil
@@ -219,44 +223,12 @@ struct NewCloudWorkspaceSheet: View {
                 return event
             }
         }
-        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [self] event in
-            // Check if click is outside the modal by testing against the nearest
-            // NSHostingView ancestor. If the click doesn't hit any subview of the
-            // hosting view that contains this sheet, dismiss.
-            guard let window = event.window else { return event }
-            let locationInWindow = event.locationInWindow
-
-            // Walk up from the window's content to find the overlay container
-            if let contentView = window.contentView,
-               let themeFrame = contentView.superview {
-                for subview in themeFrame.subviews.reversed() {
-                    // Find the overlay hosting view (it contains our sheet)
-                    guard subview.alphaValue > 0, !subview.isHidden else { continue }
-                    let pointInSubview = subview.convert(locationInWindow, from: nil)
-                    if let hitView = subview.hitTest(pointInSubview) {
-                        // Click hit something inside the overlay — check if it's actual content
-                        // (not the transparent hosting view background)
-                        if hitView !== subview {
-                            return event // Click on modal content, pass through
-                        }
-                    }
-                }
-            }
-
-            // Click was outside modal content — dismiss
-            onDismiss?()
-            return nil
-        }
     }
 
     private func removeKeyMonitor() {
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil
-        }
-        if let monitor = mouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            mouseMonitor = nil
         }
     }
 
