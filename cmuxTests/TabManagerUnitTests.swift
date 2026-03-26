@@ -323,19 +323,22 @@ final class TabManagerPullRequestProbeTests: XCTestCase {
                 number: 1889,
                 state: "MERGED",
                 url: "https://github.com/manaflow-ai/cmux/pull/1889",
-                updatedAt: "2026-03-20T18:00:00Z"
+                updatedAt: "2026-03-20T18:00:00Z",
+                title: nil, additions: nil, deletions: nil, reviewDecision: nil
             ),
             TabManager.GitHubPullRequestProbeItem(
                 number: 1891,
                 state: "OPEN",
                 url: "https://github.com/manaflow-ai/cmux/pull/1891",
-                updatedAt: "2026-03-19T18:00:00Z"
+                updatedAt: "2026-03-19T18:00:00Z",
+                title: nil, additions: nil, deletions: nil, reviewDecision: nil
             ),
             TabManager.GitHubPullRequestProbeItem(
                 number: 1800,
                 state: "CLOSED",
                 url: "https://github.com/manaflow-ai/cmux/pull/1800",
-                updatedAt: "2026-03-21T18:00:00Z"
+                updatedAt: "2026-03-21T18:00:00Z",
+                title: nil, additions: nil, deletions: nil, reviewDecision: nil
             ),
         ]
 
@@ -350,13 +353,15 @@ final class TabManagerPullRequestProbeTests: XCTestCase {
             number: 1880,
             state: "OPEN",
             url: "https://github.com/manaflow-ai/cmux/pull/1880",
-            updatedAt: "2026-03-18T18:00:00Z"
+            updatedAt: "2026-03-18T18:00:00Z",
+            title: nil, additions: nil, deletions: nil, reviewDecision: nil
         )
         let newerOpen = TabManager.GitHubPullRequestProbeItem(
             number: 1890,
             state: "OPEN",
             url: "https://github.com/manaflow-ai/cmux/pull/1890",
-            updatedAt: "2026-03-20T18:00:00Z"
+            updatedAt: "2026-03-20T18:00:00Z",
+            title: nil, additions: nil, deletions: nil, reviewDecision: nil
         )
 
         XCTAssertEqual(
@@ -370,7 +375,8 @@ final class TabManagerPullRequestProbeTests: XCTestCase {
             number: 1888,
             state: "OPEN",
             url: "https://github.com/manaflow-ai/cmux/pull/1888",
-            updatedAt: "2026-03-20T18:00:00Z"
+            updatedAt: "2026-03-20T18:00:00Z",
+            title: nil, additions: nil, deletions: nil, reviewDecision: nil
         )
 
         XCTAssertEqual(
@@ -379,13 +385,15 @@ final class TabManagerPullRequestProbeTests: XCTestCase {
                     number: 9999,
                     state: "WHATEVER",
                     url: "https://github.com/manaflow-ai/cmux/pull/9999",
-                    updatedAt: "2026-03-21T18:00:00Z"
+                    updatedAt: "2026-03-21T18:00:00Z",
+                    title: nil, additions: nil, deletions: nil, reviewDecision: nil
                 ),
                 TabManager.GitHubPullRequestProbeItem(
                     number: 10000,
                     state: "OPEN",
                     url: "not a url",
-                    updatedAt: "2026-03-21T18:00:00Z"
+                    updatedAt: "2026-03-21T18:00:00Z",
+                    title: nil, additions: nil, deletions: nil, reviewDecision: nil
                 ),
                 valid,
             ]),

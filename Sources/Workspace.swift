@@ -4924,6 +4924,22 @@ enum SidebarPullRequestChecksStatus: String {
     case pending
 }
 
+enum SidebarPullRequestReviewDecision: String {
+    case approved
+    case changesRequested = "changes_requested"
+    case reviewRequired = "review_required"
+    case pending
+
+    init?(gitHubValue: String) {
+        switch gitHubValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "APPROVED": self = .approved
+        case "CHANGES_REQUESTED": self = .changesRequested
+        case "REVIEW_REQUIRED": self = .reviewRequired
+        default: return nil
+        }
+    }
+}
+
 private func normalizedSidebarBranchName(_ branch: String?) -> String? {
     guard let branch else { return nil }
     let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4937,6 +4953,12 @@ struct SidebarPullRequestState: Equatable {
     let status: SidebarPullRequestStatus
     let branch: String?
     let checks: SidebarPullRequestChecksStatus?
+    let title: String?
+    let additions: Int?
+    let deletions: Int?
+    let reviewDecision: SidebarPullRequestReviewDecision?
+    let checksTotal: Int?
+    let checksPassed: Int?
 
     init(
         number: Int,
@@ -4944,7 +4966,13 @@ struct SidebarPullRequestState: Equatable {
         url: URL,
         status: SidebarPullRequestStatus,
         branch: String? = nil,
-        checks: SidebarPullRequestChecksStatus? = nil
+        checks: SidebarPullRequestChecksStatus? = nil,
+        title: String? = nil,
+        additions: Int? = nil,
+        deletions: Int? = nil,
+        reviewDecision: SidebarPullRequestReviewDecision? = nil,
+        checksTotal: Int? = nil,
+        checksPassed: Int? = nil
     ) {
         self.number = number
         self.label = label
@@ -4952,6 +4980,12 @@ struct SidebarPullRequestState: Equatable {
         self.status = status
         self.branch = normalizedSidebarBranchName(branch)
         self.checks = checks
+        self.title = title
+        self.additions = additions
+        self.deletions = deletions
+        self.reviewDecision = reviewDecision
+        self.checksTotal = checksTotal
+        self.checksPassed = checksPassed
     }
 }
 
@@ -6376,11 +6410,20 @@ final class Workspace: Identifiable, ObservableObject {
         url: URL,
         status: SidebarPullRequestStatus,
         branch: String? = nil,
-        checks: SidebarPullRequestChecksStatus? = nil
+        checks: SidebarPullRequestChecksStatus? = nil,
+        title: String? = nil,
+        additions: Int? = nil,
+        deletions: Int? = nil,
+        reviewDecision: SidebarPullRequestReviewDecision? = nil,
+        checksTotal: Int? = nil,
+        checksPassed: Int? = nil
     ) {
         let existing = panelPullRequests[panelId]
         let normalizedBranch = normalizedSidebarBranchName(branch)
         let currentPanelBranch = normalizedSidebarBranchName(panelGitBranches[panelId]?.branch)
+        let isSamePR = existing.map {
+            $0.number == number && $0.label == label && $0.url == url && $0.status == status
+        } ?? false
         let resolvedBranch: String? = {
             if let normalizedBranch {
                 return normalizedBranch
@@ -6388,27 +6431,43 @@ final class Workspace: Identifiable, ObservableObject {
             if let currentPanelBranch {
                 return currentPanelBranch
             }
-            guard let existing,
-                  existing.number == number,
-                  existing.label == label,
-                  existing.url == url,
-                  existing.status == status else {
-                return nil
-            }
-            return existing.branch
+            guard isSamePR else { return nil }
+            return existing?.branch
         }()
         let resolvedChecks: SidebarPullRequestChecksStatus? = {
-            if let checks {
-                return checks
-            }
-            guard let existing,
-                  existing.number == number,
-                  existing.label == label,
-                  existing.url == url,
-                  existing.status == status else {
-                return nil
-            }
-            return existing.checks
+            if let checks { return checks }
+            guard isSamePR else { return nil }
+            return existing?.checks
+        }()
+        let resolvedTitle: String? = {
+            if let title { return title }
+            guard isSamePR else { return nil }
+            return existing?.title
+        }()
+        let resolvedAdditions: Int? = {
+            if let additions { return additions }
+            guard isSamePR else { return nil }
+            return existing?.additions
+        }()
+        let resolvedDeletions: Int? = {
+            if let deletions { return deletions }
+            guard isSamePR else { return nil }
+            return existing?.deletions
+        }()
+        let resolvedReviewDecision: SidebarPullRequestReviewDecision? = {
+            if let reviewDecision { return reviewDecision }
+            guard isSamePR else { return nil }
+            return existing?.reviewDecision
+        }()
+        let resolvedChecksTotal: Int? = {
+            if let checksTotal { return checksTotal }
+            guard isSamePR else { return nil }
+            return existing?.checksTotal
+        }()
+        let resolvedChecksPassed: Int? = {
+            if let checksPassed { return checksPassed }
+            guard isSamePR else { return nil }
+            return existing?.checksPassed
         }()
         let state = SidebarPullRequestState(
             number: number,
@@ -6416,7 +6475,13 @@ final class Workspace: Identifiable, ObservableObject {
             url: url,
             status: status,
             branch: resolvedBranch,
-            checks: resolvedChecks
+            checks: resolvedChecks,
+            title: resolvedTitle,
+            additions: resolvedAdditions,
+            deletions: resolvedDeletions,
+            reviewDecision: resolvedReviewDecision,
+            checksTotal: resolvedChecksTotal,
+            checksPassed: resolvedChecksPassed
         )
         if existing != state {
             panelPullRequests[panelId] = state

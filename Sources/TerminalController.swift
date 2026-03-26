@@ -389,40 +389,71 @@ class TerminalController {
         url: URL,
         status: SidebarPullRequestStatus,
         branch: String?,
-        checks: SidebarPullRequestChecksStatus?
+        checks: SidebarPullRequestChecksStatus?,
+        title: String? = nil,
+        additions: Int? = nil,
+        deletions: Int? = nil,
+        reviewDecision: SidebarPullRequestReviewDecision? = nil,
+        checksTotal: Int? = nil,
+        checksPassed: Int? = nil
     ) -> Bool {
         guard let current else { return true }
+        let isSamePR = current.number == number
+            && current.label == label
+            && current.url == url
+            && current.status == status
         let normalizedBranch = branch?.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveBranch: String? = {
             if let normalizedBranch, !normalizedBranch.isEmpty {
                 return normalizedBranch
             }
-            guard current.number == number,
-                  current.label == label,
-                  current.url == url,
-                  current.status == status else {
-                return nil
-            }
+            guard isSamePR else { return nil }
             return current.branch
         }()
         let effectiveChecks: SidebarPullRequestChecksStatus? = {
-            if let checks {
-                return checks
-            }
-            guard current.number == number,
-                  current.label == label,
-                  current.url == url,
-                  current.status == status else {
-                return nil
-            }
+            if let checks { return checks }
+            guard isSamePR else { return nil }
             return current.checks
         }()
-        return current.number != number
-            || current.label != label
-            || current.url != url
-            || current.status != status
+        let effectiveTitle: String? = {
+            if let title { return title }
+            guard isSamePR else { return nil }
+            return current.title
+        }()
+        let effectiveAdditions: Int? = {
+            if let additions { return additions }
+            guard isSamePR else { return nil }
+            return current.additions
+        }()
+        let effectiveDeletions: Int? = {
+            if let deletions { return deletions }
+            guard isSamePR else { return nil }
+            return current.deletions
+        }()
+        let effectiveReviewDecision: SidebarPullRequestReviewDecision? = {
+            if let reviewDecision { return reviewDecision }
+            guard isSamePR else { return nil }
+            return current.reviewDecision
+        }()
+        let effectiveChecksTotal: Int? = {
+            if let checksTotal { return checksTotal }
+            guard isSamePR else { return nil }
+            return current.checksTotal
+        }()
+        let effectiveChecksPassed: Int? = {
+            if let checksPassed { return checksPassed }
+            guard isSamePR else { return nil }
+            return current.checksPassed
+        }()
+        return !isSamePR
             || current.branch != effectiveBranch
             || current.checks != effectiveChecks
+            || current.title != effectiveTitle
+            || current.additions != effectiveAdditions
+            || current.deletions != effectiveDeletions
+            || current.reviewDecision != effectiveReviewDecision
+            || current.checksTotal != effectiveChecksTotal
+            || current.checksPassed != effectiveChecksPassed
     }
 
     nonisolated static func shouldReplacePorts(current: [Int]?, next: [Int]) -> Bool {
@@ -14713,10 +14744,12 @@ class TerminalController {
         return result
     }
 
+    private static let reportPrUsage = "report_pr <number> <url> [--label=PR] [--state=open|merged|closed] [--branch=<name>] [--checks=pass|fail|pending] [--title=<text>] [--additions=N] [--deletions=N] [--review=approved|changes_requested|review_required|pending] [--checks-total=N] [--checks-passed=N] [--tab=X] [--panel=Y]"
+
     private func reportPullRequest(_ args: String) -> String {
         let parsed = parseOptions(args)
         guard parsed.positional.count >= 2 else {
-            return "ERROR: Missing pull request number or URL — usage: report_pr <number> <url> [--label=PR] [--state=open|merged|closed] [--branch=<name>] [--checks=pass|fail|pending] [--tab=X] [--panel=Y]"
+            return "ERROR: Missing pull request number or URL — usage: \(Self.reportPrUsage)"
         }
 
         let rawNumber = parsed.positional[0].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -14750,16 +14783,30 @@ class TerminalController {
 
         let labelRaw = normalizedOptionValue(parsed.options["label"]) ?? "PR"
         guard !labelRaw.isEmpty else {
-            return "ERROR: Invalid review label — usage: report_pr <number> <url> [--label=PR] [--state=open|merged|closed] [--branch=<name>] [--checks=pass|fail|pending] [--tab=X] [--panel=Y]"
+            return "ERROR: Invalid review label — usage: \(Self.reportPrUsage)"
         }
         let label = String(labelRaw.prefix(16))
+
+        let title = normalizedOptionValue(parsed.options["title"])
+        let additions = normalizedOptionValue(parsed.options["additions"]).flatMap { Int($0) }
+        let deletions = normalizedOptionValue(parsed.options["deletions"]).flatMap { Int($0) }
+
+        let reviewDecision: SidebarPullRequestReviewDecision?
+        if let rawReview = normalizedOptionValue(parsed.options["review"]) {
+            reviewDecision = SidebarPullRequestReviewDecision(rawValue: rawReview.lowercased())
+        } else {
+            reviewDecision = nil
+        }
+
+        let checksTotal = normalizedOptionValue(parsed.options["checks-total"]).flatMap { Int($0) }
+        let checksPassed = normalizedOptionValue(parsed.options["checks-passed"]).flatMap { Int($0) }
 
         // Shell integration provides explicit workspace/panel UUIDs for browser metadata.
         // Keep this telemetry path off-main so SwiftUI render passes can't deadlock the socket handler.
         return schedulePanelMetadataMutation(
             args: args,
             options: parsed.options,
-            missingPanelUsage: "report_pr <number> <url> [--label=PR] [--state=open|merged|closed] [--branch=<name>] [--checks=pass|fail|pending] [--tab=X] [--panel=Y]"
+            missingPanelUsage: Self.reportPrUsage
         ) { tab, surfaceId in
             guard Self.shouldReplacePullRequest(
                 current: tab.panelPullRequests[surfaceId],
@@ -14768,7 +14815,13 @@ class TerminalController {
                 url: url,
                 status: status,
                 branch: branch,
-                checks: checks
+                checks: checks,
+                title: title,
+                additions: additions,
+                deletions: deletions,
+                reviewDecision: reviewDecision,
+                checksTotal: checksTotal,
+                checksPassed: checksPassed
             ) else {
                 return
             }
@@ -14780,7 +14833,13 @@ class TerminalController {
                 url: url,
                 status: status,
                 branch: branch,
-                checks: checks
+                checks: checks,
+                title: title,
+                additions: additions,
+                deletions: deletions,
+                reviewDecision: reviewDecision,
+                checksTotal: checksTotal,
+                checksPassed: checksPassed
             )
         }
     }

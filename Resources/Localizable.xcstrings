@@ -65237,6 +65237,74 @@
         }
       }
     },
+    "sidebar.pullRequest.reviewApproved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approved"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "承認済み"
+          }
+        }
+      }
+    },
+    "sidebar.pullRequest.reviewChangesRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes requested"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "変更リクエスト"
+          }
+        }
+      }
+    },
+    "sidebar.pullRequest.reviewRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review required"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レビュー必須"
+          }
+        }
+      }
+    },
+    "sidebar.pullRequest.reviewPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pending review"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レビュー待ち"
+          }
+        }
+      }
+    },
     "sidebar.workspace.accessibilityHint": {
       "extractionState": "manual",
       "localizations": {
