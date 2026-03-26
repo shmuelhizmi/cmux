@@ -97,6 +97,7 @@ struct NewCloudWorkspaceSheet: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .onSubmit { selectCurrentItem() }
+                .onChange(of: searchText) { _, _ in selectedIndex = 0 }
                 if isLoading {
                     ProgressView()
                         .controlSize(.small)
@@ -181,27 +182,53 @@ struct NewCloudWorkspaceSheet: View {
             }
         }
         .accessibilityIdentifier("NewCloudWorkspaceSheet")
-        .onAppear { loadData() }
-        .onExitCommand { onDismiss?() }
-        .background(keyboardHandler)
+        .onAppear {
+            loadData()
+            installKeyMonitor()
+        }
+        .onDisappear {
+            removeKeyMonitor()
+        }
     }
 
-    // MARK: - Keyboard Navigation
+    // MARK: - Keyboard Navigation via NSEvent Monitor
 
-    private var keyboardHandler: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .onMoveCommand { direction in
+    @State private var keyMonitor: Any?
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
+            let keyCode = event.keyCode
+            // Down arrow
+            if keyCode == 125 {
                 let items = filteredItems
-                guard !items.isEmpty else { return }
-                switch direction {
-                case .down:
+                if !items.isEmpty {
                     selectedIndex = min(selectedIndex + 1, items.count - 1)
-                case .up:
-                    selectedIndex = max(selectedIndex - 1, 0)
-                default: break
                 }
+                return nil // consumed
             }
+            // Up arrow
+            if keyCode == 126 {
+                let items = filteredItems
+                if !items.isEmpty {
+                    selectedIndex = max(selectedIndex - 1, 0)
+                }
+                return nil
+            }
+            // Escape
+            if keyCode == 53 {
+                onDismiss?()
+                return nil
+            }
+            return event // pass through
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
     }
 
     // MARK: - Item Row
