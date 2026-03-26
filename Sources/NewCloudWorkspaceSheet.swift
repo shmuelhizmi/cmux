@@ -193,28 +193,31 @@ struct NewCloudWorkspaceSheet: View {
 
     // MARK: - Event Monitors (keyboard + click-outside-dismiss)
 
+    private static let kVKDownArrow: UInt16 = 0x7D
+    private static let kVKUpArrow: UInt16 = 0x7E
+    private static let kVKEscape: UInt16 = 0x35
+
     @State private var keyMonitor: Any?
     @State private var mouseMonitor: Any?
 
     private func installKeyMonitor() {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
-            let keyCode = event.keyCode
-            if keyCode == 125 { // Down arrow
+            switch event.keyCode {
+            case Self.kVKDownArrow:
                 let items = filteredItems
                 if !items.isEmpty { selectedIndex = min(selectedIndex + 1, items.count - 1) }
                 return nil
-            }
-            if keyCode == 126 { // Up arrow
+            case Self.kVKUpArrow:
                 let items = filteredItems
                 if !items.isEmpty { selectedIndex = max(selectedIndex - 1, 0) }
                 return nil
-            }
-            if keyCode == 53 { // Escape
+            case Self.kVKEscape:
                 onDismiss?()
                 return nil
+            default:
+                return event
             }
-            return event
         }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [self] event in
             // Check if click is outside the modal by testing against the nearest
