@@ -460,9 +460,18 @@ struct NewCloudWorkspaceSheet: View {
         return nil
     }
 
+    /// Sanitize for fly.io app names: lowercase alphanumeric and dashes, max 63 chars.
+    private static func sanitizeFlyAppName(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        let cleaned = String(lowered.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" })
+        let trimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return String(trimmed.prefix(63))
+    }
+
     private func buildConfig(gitSetupScript: String) -> FlyCloudConfiguration {
         let app = flyAppName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let appName = app.isEmpty ? (detectedRepoSlug?.replacingOccurrences(of: "/", with: "-") ?? "dev") : app
+        let rawName = app.isEmpty ? (detectedRepoSlug?.replacingOccurrences(of: "/", with: "-") ?? "dev") : app
+        let appName = Self.sanitizeFlyAppName(rawName)
         return FlyCloudConfiguration(
             appName: appName,
             machineSpec: .default,
