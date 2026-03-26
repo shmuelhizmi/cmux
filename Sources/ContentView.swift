@@ -3681,23 +3681,11 @@ struct ContentView: View {
 
     private var newCloudWorkspaceOverlay: some View {
         ZStack {
-            // Non-interactive dimming layer
+            // Dimming backdrop — no gesture handling here, dismiss is via NSEvent monitor
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            // Invisible backdrop that catches clicks outside the modal
-            Color.clear
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onEnded { _ in
-                            dismissCloudWorkspaceModal()
-                        }
-                )
-
-            // Modal content — sits above the backdrop gesture layer
             NewCloudWorkspaceSheet(
                 currentDirectory: tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })?.currentDirectory,
                 onSubmit: { cloudConfig, label in
@@ -3723,9 +3711,6 @@ struct ContentView: View {
                     .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 8)
-        }
-        .onExitCommand {
-            dismissCloudWorkspaceModal()
         }
         .zIndex(1500)
     }

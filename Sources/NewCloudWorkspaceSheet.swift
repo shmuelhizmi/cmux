@@ -191,36 +191,58 @@ struct NewCloudWorkspaceSheet: View {
         }
     }
 
-    // MARK: - Keyboard Navigation via NSEvent Monitor
+    // MARK: - Event Monitors (keyboard + click-outside-dismiss)
 
     @State private var keyMonitor: Any?
+    @State private var mouseMonitor: Any?
 
     private func installKeyMonitor() {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
             let keyCode = event.keyCode
-            // Down arrow
-            if keyCode == 125 {
+            if keyCode == 125 { // Down arrow
                 let items = filteredItems
-                if !items.isEmpty {
-                    selectedIndex = min(selectedIndex + 1, items.count - 1)
-                }
-                return nil // consumed
-            }
-            // Up arrow
-            if keyCode == 126 {
-                let items = filteredItems
-                if !items.isEmpty {
-                    selectedIndex = max(selectedIndex - 1, 0)
-                }
+                if !items.isEmpty { selectedIndex = min(selectedIndex + 1, items.count - 1) }
                 return nil
             }
-            // Escape
-            if keyCode == 53 {
+            if keyCode == 126 { // Up arrow
+                let items = filteredItems
+                if !items.isEmpty { selectedIndex = max(selectedIndex - 1, 0) }
+                return nil
+            }
+            if keyCode == 53 { // Escape
                 onDismiss?()
                 return nil
             }
-            return event // pass through
+            return event
+        }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [self] event in
+            // Check if click is outside the modal by testing against the nearest
+            // NSHostingView ancestor. If the click doesn't hit any subview of the
+            // hosting view that contains this sheet, dismiss.
+            guard let window = event.window else { return event }
+            let locationInWindow = event.locationInWindow
+
+            // Walk up from the window's content to find the overlay container
+            if let contentView = window.contentView,
+               let themeFrame = contentView.superview {
+                for subview in themeFrame.subviews.reversed() {
+                    // Find the overlay hosting view (it contains our sheet)
+                    guard subview.alphaValue > 0, !subview.isHidden else { continue }
+                    let pointInSubview = subview.convert(locationInWindow, from: nil)
+                    if let hitView = subview.hitTest(pointInSubview) {
+                        // Click hit something inside the overlay — check if it's actual content
+                        // (not the transparent hosting view background)
+                        if hitView !== subview {
+                            return event // Click on modal content, pass through
+                        }
+                    }
+                }
+            }
+
+            // Click was outside modal content — dismiss
+            onDismiss?()
+            return nil
         }
     }
 
@@ -228,6 +250,10 @@ struct NewCloudWorkspaceSheet: View {
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil
+        }
+        if let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseMonitor = nil
         }
     }
 
