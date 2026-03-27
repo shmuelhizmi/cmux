@@ -5577,8 +5577,20 @@ final class Workspace: Identifiable, ObservableObject {
     // MARK: - Cloud Sandbox
 
     @Published var cloudConfiguration: DaytonaCloudConfiguration?
-    @Published var cloudMachineState: DaytonaCloudMachineState = .stopped
+    @Published var cloudMachineState: DaytonaCloudMachineState = .stopped {
+        didSet {
+            #if DEBUG
+            if oldValue != cloudMachineState {
+                dlog("daytona.stateChange \(oldValue.rawValue) -> \(cloudMachineState.rawValue) wsId=\(id)")
+            }
+            #endif
+        }
+    }
     @Published var cloudMachineDetail: String?
+    /// Which provisioning step was active when the error occurred.
+    var cloudMachineErrorAtStep: DaytonaCloudMachineState?
+    /// Per-step output shown in the provisioning overlay under the active step.
+    @Published var cloudMachineStepOutput: String?
     var sandboxController: DaytonaSandboxController?
 
     func stopCloudMachineIfNeeded() {

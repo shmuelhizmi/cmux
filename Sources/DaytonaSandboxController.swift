@@ -81,27 +81,39 @@ final class DaytonaSandboxController {
 
     private func runProvisioning() async {
         guard let workspace else { return }
+        // Track which step we're on so error messages include context
+        var currentStep = ""
         do {
             try Task.checkCancellation()
 
             // Step 1: Create or start the sandbox
             let sandboxID: String
             if let existingID = configuration.resolvedSandboxID {
+                currentStep = "Starting sandbox"
 #if DEBUG
                 dlog("daytona.provision startExisting id=\(existingID)")
 #endif
                 workspace.cloudMachineState = .starting
+                workspace.cloudMachineStepOutput = "Resuming sandbox \(existingID.prefix(8))..."
                 try await api.startSandbox(id: existingID)
                 sandboxID = existingID
             } else {
+                currentStep = "Creating sandbox"
 #if DEBUG
                 dlog("daytona.provision createNew snapshot=\(configuration.sandboxSpec.snapshot ?? "nil")")
 #endif
                 workspace.cloudMachineState = .creating
+                let dc = configuration.devContainer
+                if let img = dc?.image {
+                    workspace.cloudMachineStepOutput = "Image: \(img)"
+                } else if let snapshot = configuration.sandboxSpec.snapshot {
+                    workspace.cloudMachineStepOutput = "Snapshot: \(snapshot)"
+                }
                 let sandbox = try await createSandbox()
                 sandboxID = sandbox.id
                 configuration.resolvedSandboxID = sandboxID
                 workspace.cloudConfiguration?.resolvedSandboxID = sandboxID
+                workspace.cloudMachineStepOutput = "Created \(sandboxID.prefix(8))"
 #if DEBUG
                 dlog("daytona.provision created id=\(sandboxID)")
 #endif
@@ -110,8 +122,11 @@ final class DaytonaSandboxController {
             try Task.checkCancellation()
 
             // Step 2: Poll until the sandbox is running
+            currentStep = "Starting sandbox"
             workspace.cloudMachineState = .starting
-            try await waitForRunning(sandboxID: sandboxID)
+            workspace.cloudMachineStepOutput = "Waiting for sandbox to be ready..."
+            try await waitForRunning(sandboxID: sandboxID, workspace: workspace)
+            workspace.cloudMachineStepOutput = "Sandbox running"
 #if DEBUG
             dlog("daytona.provision sandbox running id=\(sandboxID)")
 #endif
@@ -119,28 +134,79 @@ final class DaytonaSandboxController {
             try Task.checkCancellation()
 
             // Step 3: Create SSH access
+            currentStep = "Obtaining SSH access"
             workspace.cloudMachineState = .waitingForSSH
+            workspace.cloudMachineStepOutput = "Requesting SSH token..."
             let sshAccess = try await api.createSSHAccess(sandboxId: sandboxID, expiresInMinutes: 60)
+            workspace.cloudMachineStepOutput = "SSH token obtained"
 #if DEBUG
             dlog("daytona.provision sshToken obtained, length=\(sshAccess.token.count)")
 #endif
 
             try Task.checkCancellation()
 
-            // Step 4: Hand off to existing remote session infrastructure
+            // Step 4: Connect to sandbox via SSH
+            currentStep = "Connecting to sandbox"
+            workspace.cloudMachineState = .connecting
+            workspace.cloudMachineStepOutput = "ssh \(sshAccess.token.prefix(8))...@ssh.app.daytona.io"
             let remoteConfig = buildRemoteConfiguration(sshToken: sshAccess.token)
 #if DEBUG
             dlog("daytona.provision handoff dest=\(remoteConfig.destination) identity=\(remoteConfig.identityFile ?? "nil") options=\(remoteConfig.sshOptions) startupCmd=\(remoteConfig.terminalStartupCommand ?? "nil") uploadViaSSHPipe=\(remoteConfig.uploadViaSSHPipe)")
-            // Log the actual script content so we can verify the SSH command is correct
             if let scriptPath = remoteConfig.terminalStartupCommand,
                let scriptContent = try? String(contentsOfFile: scriptPath, encoding: .utf8) {
                 dlog("daytona.provision startupScript.content=\(scriptContent.replacingOccurrences(of: "\n", with: "\\n"))")
             }
 #endif
             workspace.configureRemoteConnection(remoteConfig, autoConnect: true)
+            workspace.cloudMachineStepOutput = "Bootstrapping remote daemon..."
+#if DEBUG
+            dlog("daytona.provision step4.waitBegin remoteState=\(workspace.remoteConnectionState.rawValue)")
+#endif
+
+            // Wait for remote connection to be established
+            try await waitForRemoteConnection(workspace: workspace)
+#if DEBUG
+            dlog("daytona.provision step4.waitDone remoteState=\(workspace.remoteConnectionState.rawValue)")
+#endif
+            workspace.cloudMachineStepOutput = "Connected"
+
+            try Task.checkCancellation()
+
+            // Step 5: Clone repository via SSH (not in the terminal)
+#if DEBUG
+            dlog("daytona.provision step5.check hasScript=\(configuration.gitSetupScript != nil) scriptLen=\(configuration.gitSetupScript?.count ?? 0)")
+#endif
+            if let script = configuration.gitSetupScript, !script.isEmpty {
+                currentStep = "Cloning repository"
+                workspace.cloudMachineState = .cloningRepository
+                workspace.cloudMachineStepOutput = "Running git setup..."
+#if DEBUG
+                dlog("daytona.provision step5.cloneBegin script=\(script.replacingOccurrences(of: "\n", with: "\\n").prefix(500))")
+#endif
+                try await runSSHCommand(
+                    script,
+                    sshToken: sshAccess.token,
+                    workspace: workspace
+                )
+                // Also run postCreateCommand if present
+                if let postCreate = configuration.devContainer?.postCreateCommand?.shellString {
+                    workspace.cloudMachineStepOutput = "Running postCreateCommand..."
+                    try await runSSHCommand(
+                        "cd /home/daytona/repo && " + postCreate,
+                        sshToken: sshAccess.token,
+                        workspace: workspace
+                    )
+                }
+                workspace.cloudMachineStepOutput = "Repository ready"
+            }
+
+            workspace.cloudMachineStepOutput = nil
+#if DEBUG
+            dlog("daytona.provision settingReady wsId=\(workspace.id) currentState=\(workspace.cloudMachineState.rawValue) hasCloudConfig=\(workspace.cloudConfiguration != nil)")
+#endif
             workspace.cloudMachineState = .ready
 #if DEBUG
-            dlog("daytona.provision complete")
+            dlog("daytona.provision complete state=\(workspace.cloudMachineState.rawValue)")
 #endif
 
         } catch is CancellationError {
@@ -148,15 +214,17 @@ final class DaytonaSandboxController {
             dlog("daytona.provision cancelled")
 #endif
         } catch {
-            let detail: String
+            let errorDetail: String
             if let apiErr = error as? DaytonaAPIError {
-                detail = apiErr.errorDescription ?? String(describing: error)
+                errorDetail = apiErr.errorDescription ?? String(describing: error)
             } else {
-                detail = error.localizedDescription
+                errorDetail = error.localizedDescription
             }
+            let detail = currentStep.isEmpty ? errorDetail : "\(currentStep): \(errorDetail)"
 #if DEBUG
             dlog("daytona.provision error: \(detail)")
 #endif
+            workspace.cloudMachineErrorAtStep = workspace.cloudMachineState
             workspace.cloudMachineState = .error
             workspace.cloudMachineDetail = detail
         }
@@ -212,19 +280,21 @@ final class DaytonaSandboxController {
 
     // MARK: - State Polling
 
-    private func waitForRunning(sandboxID: String, maxAttempts: Int = 60, delaySeconds: UInt64 = 2) async throws {
+    private func waitForRunning(sandboxID: String, workspace: Workspace? = nil, maxAttempts: Int = 60, delaySeconds: UInt64 = 2) async throws {
         for attempt in 1...maxAttempts {
             try Task.checkCancellation()
             let sandbox = try await api.getSandbox(id: sandboxID)
+            let state = sandbox.state ?? "unknown"
 #if DEBUG
             if attempt == 1 || attempt % 5 == 0 {
-                dlog("daytona.poll attempt=\(attempt) state=\(sandbox.state ?? "nil") id=\(sandboxID)")
+                dlog("daytona.poll attempt=\(attempt) state=\(state) id=\(sandboxID)")
             }
 #endif
-            if sandbox.state == "running" || sandbox.state == "started" {
+            workspace?.cloudMachineStepOutput = "State: \(state) (attempt \(attempt)/\(maxAttempts))"
+            if state == "running" || state == "started" {
                 return
             }
-            if sandbox.state == "error" {
+            if state == "error" {
                 throw DaytonaControllerError.sandboxNotReachable
             }
             if attempt < maxAttempts {
@@ -232,6 +302,158 @@ final class DaytonaSandboxController {
             }
         }
         throw DaytonaControllerError.sandboxNotReachable
+    }
+
+    // MARK: - SSH Command Execution
+
+    /// Runs a shell command on the sandbox via SSH. Streams output lines to `cloudMachineStepOutput`.
+    /// Runs the blocking process off the main actor to avoid freezing the UI.
+    private func runSSHCommand(
+        _ command: String,
+        sshToken: String,
+        workspace: Workspace
+    ) async throws {
+        try Task.checkCancellation()
+        let destination = "\(sshToken)@ssh.app.daytona.io"
+        let identityFile = Self.defaultSSHKeyPath()
+
+        var args = [String]()
+        if let identityFile {
+            args += ["-i", identityFile]
+        }
+        args += [
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
+            "-o", "BatchMode=no",
+            "-o", "PasswordAuthentication=no",
+            "-o", "PreferredAuthentications=publickey,keyboard-interactive,none",
+            "-o", "ConnectTimeout=10",
+            destination,
+            command,
+        ]
+
+#if DEBUG
+        dlog("daytona.ssh.exec command=\(command.prefix(200))")
+#endif
+
+        // Run blocking process work on a background thread
+        let result: SSHCommandResult = try await Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            process.arguments = args
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+
+            try process.run()
+
+            let outputHandle = stdoutPipe.fileHandleForReading
+            let errorHandle = stderrPipe.fileHandleForReading
+
+            // Collect all output
+            var stdoutLines: [String] = []
+            var stderrBuf = Data()
+
+            // Read stdout and stderr in parallel threads
+            let stdoutThread = Thread {
+                while true {
+                    let data = outputHandle.availableData
+                    if data.isEmpty { break }
+                    if let text = String(data: data, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                       !text.isEmpty {
+                        let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
+                        stdoutLines.append(contentsOf: lines)
+                        // Update UI on main actor with the last line
+                        let lastLine = String(lines.last!.prefix(80))
+                        DispatchQueue.main.async { [weak workspace] in
+                            workspace?.cloudMachineStepOutput = lastLine
+                        }
+                    }
+                }
+            }
+            let stderrThread = Thread {
+                while true {
+                    let data = errorHandle.availableData
+                    if data.isEmpty { break }
+                    stderrBuf.append(data)
+                }
+            }
+            stdoutThread.start()
+            stderrThread.start()
+
+            process.waitUntilExit()
+            // Give pipe readers a moment to finish
+            Thread.sleep(forTimeInterval: 0.1)
+
+            let exitCode = process.terminationStatus
+            let stderrStr = String(data: stderrBuf, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            return SSHCommandResult(
+                exitCode: exitCode,
+                stdoutLines: stdoutLines,
+                stderr: stderrStr
+            )
+        }.value
+
+#if DEBUG
+        dlog("daytona.ssh.exec.done exitCode=\(result.exitCode) stdoutLines=\(result.stdoutLines.count) stderr=\(result.stderr.prefix(200)) lastStdout=\(result.stdoutLines.last?.prefix(100) ?? "nil")")
+#endif
+        if result.exitCode != 0 {
+            // Include both stderr and last stdout lines for context
+            let output = result.stderr.isEmpty
+                ? result.stdoutLines.suffix(5).joined(separator: "\n")
+                : result.stderr
+            throw DaytonaControllerError.setupCommandFailed(exitCode: result.exitCode, output: output)
+        }
+    }
+
+    private struct SSHCommandResult: Sendable {
+        let exitCode: Int32
+        let stdoutLines: [String]
+        let stderr: String
+    }
+
+    // MARK: - Remote Connection Wait
+
+    /// Polls the workspace's remote connection state until connected or error, with timeout.
+    private func waitForRemoteConnection(workspace: Workspace, timeoutSeconds: Int = 60) async throws {
+#if DEBUG
+        dlog("daytona.waitRemote.begin initialState=\(workspace.remoteConnectionState.rawValue) timeout=\(timeoutSeconds)")
+#endif
+        for attempt in 1...(timeoutSeconds * 2) {
+            try Task.checkCancellation()
+            let state = workspace.remoteConnectionState
+#if DEBUG
+            if attempt <= 5 || attempt % 10 == 0 {
+                dlog("daytona.waitRemote attempt=\(attempt) state=\(state.rawValue)")
+            }
+#endif
+            switch state {
+            case .connected:
+#if DEBUG
+                dlog("daytona.waitRemote.connected attempt=\(attempt)")
+#endif
+                return
+            case .error:
+#if DEBUG
+                dlog("daytona.waitRemote.error attempt=\(attempt)")
+#endif
+                throw DaytonaControllerError.remoteConnectionFailed
+            case .connecting, .disconnected:
+                if attempt % 10 == 0 {
+                    workspace.cloudMachineStepOutput = "Bootstrapping remote daemon... (\(attempt / 2)s)"
+                }
+                try await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+#if DEBUG
+        dlog("daytona.waitRemote.timeout")
+#endif
+        throw DaytonaControllerError.remoteConnectionFailed
     }
 
     // MARK: - Remote Configuration Handoff
@@ -261,36 +483,14 @@ final class DaytonaSandboxController {
         // Daytona's SSH proxy does NOT allocate a PTY even with ssh -tt.
         // Use `script -qc "..." /dev/null` on the remote to force PTY allocation
         // so that bash gets an interactive terminal with prompt, colors, etc.
-        // Append devcontainer postCreateCommand to git setup if present
-        let postCreate = configuration.devContainer?.postCreateCommand?.shellString
-
-        let startupCommand: String
-        if let script = configuration.gitSetupScript, !script.isEmpty {
-            // SSH into sandbox, run the git setup, then start an interactive login shell.
-            // For the initial terminal, the setup runs (clone etc.).
-            // For subsequent terminals, the clone is already done so the cd succeeds and the shell starts.
-            var remoteBody = "cd /home/daytona/repo 2>/dev/null || { " + script + " && cd /home/daytona/repo 2>/dev/null; }"
-            if let postCreate {
-                // Run postCreateCommand once (guard with a marker file)
-                remoteBody += "; if [ ! -f /tmp/.cmux-postcreate-done ]; then " + postCreate + " && touch /tmp/.cmux-postcreate-done; fi"
-            }
-            let remoteScript = remoteBody + "; exec script -qc \"/bin/bash --login\" /dev/null"
-            let sshCmd = Self.buildSSHCommandUnquoted(destination: destination, identityFile: identityFile, sshOptions: sshOptions, extraFlags: ["-tt"])
-            // The remote command is single-quoted so no local shell expansion occurs.
-            // Single quotes within the remote script are escaped as '\'' (end quote,
-            // escaped literal quote, restart quote).
-            let escapedRemoteScript = remoteScript.replacingOccurrences(of: "'", with: "'\\''")
-            startupCommand = Self.writeStartupScript(
-                "exec " + sshCmd + " '\(escapedRemoteScript)'"
-            )
-        } else {
-            let remoteScript = "exec script -qc \"/bin/bash --login\" /dev/null"
-            let sshCmd = Self.buildSSHCommandUnquoted(destination: destination, identityFile: identityFile, sshOptions: sshOptions, extraFlags: ["-tt"])
-            let escapedRemoteScript = remoteScript.replacingOccurrences(of: "'", with: "'\\''")
-            startupCommand = Self.writeStartupScript(
-                "exec " + sshCmd + " '\(escapedRemoteScript)'"
-            )
-        }
+        // Git clone and setup run during provisioning (via runSSHCommand), so the
+        // terminal startup command just opens a shell in the repo directory.
+        let remoteScript = "cd /home/daytona/repo 2>/dev/null; exec script -qc \"/bin/bash --login\" /dev/null"
+        let sshCmd = Self.buildSSHCommandUnquoted(destination: destination, identityFile: identityFile, sshOptions: sshOptions, extraFlags: ["-tt"])
+        let escapedRemoteScript = remoteScript.replacingOccurrences(of: "'", with: "'\\''")
+        let startupCommand = Self.writeStartupScript(
+            "exec " + sshCmd + " '\(escapedRemoteScript)'"
+        )
 
         return WorkspaceRemoteConfiguration(
             destination: destination,
@@ -374,6 +574,8 @@ final class DaytonaSandboxController {
 enum DaytonaControllerError: LocalizedError {
     case sandboxNotReachable
     case sshAccessFailed
+    case remoteConnectionFailed
+    case setupCommandFailed(exitCode: Int32, output: String)
 
     var errorDescription: String? {
         switch self {
@@ -381,6 +583,13 @@ enum DaytonaControllerError: LocalizedError {
             return "Daytona sandbox did not become reachable"
         case .sshAccessFailed:
             return "Failed to create SSH access for Daytona sandbox"
+        case .remoteConnectionFailed:
+            return "Failed to establish remote connection to sandbox"
+        case .setupCommandFailed(let exitCode, let output):
+            if output.isEmpty {
+                return "Setup command failed (exit code \(exitCode))"
+            }
+            return "Setup failed (exit \(exitCode)): \(output)"
         }
     }
 }
