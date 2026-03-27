@@ -84,6 +84,9 @@ struct NewCloudWorkspaceSheet: View {
     @State private var detectedDevContainer: DevContainerConfig?
     @State private var githubToken: String?
     @State private var showMachineSettings: Bool = false
+    @State private var existingSandboxes: [DaytonaSandbox] = []
+    @State private var isLoadingSandboxes: Bool = false
+    @State private var showExistingSandboxes: Bool = false
 
     @AppStorage(CloudMachineSettings.cpuKey) private var cpuSetting = CloudMachineSettings.defaultCPU
     @AppStorage(CloudMachineSettings.memoryKey) private var memorySetting = CloudMachineSettings.defaultMemory
@@ -196,6 +199,9 @@ struct NewCloudWorkspaceSheet: View {
                 // Machine settings
                 machineSettingsSection
 
+                // Existing sandboxes
+                existingSandboxesSection
+
                 // Footer
                 HStack {
                     Button(String(localized: "cloud.sheet.localWorkspace", defaultValue: "Local workspace")) {
@@ -220,6 +226,7 @@ struct NewCloudWorkspaceSheet: View {
         .accessibilityIdentifier("NewCloudWorkspaceSheet")
         .onAppear {
             loadData()
+            loadExistingSandboxes()
             installKeyMonitor()
         }
         .onDisappear {
@@ -467,6 +474,215 @@ struct NewCloudWorkspaceSheet: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.primary)
                 .frame(width: 65, alignment: .trailing)
+        }
+    }
+
+    // MARK: - Existing Sandboxes
+
+    private var existingSandboxesSection: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showExistingSandboxes.toggle()
+                    if showExistingSandboxes && existingSandboxes.isEmpty && !isLoadingSandboxes {
+                        loadExistingSandboxes()
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showExistingSandboxes ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 12)
+                    Text(String(localized: "cloud.sandboxes.title", defaultValue: "Existing Sandboxes"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isLoadingSandboxes {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else if !existingSandboxes.isEmpty {
+                        Text("\(existingSandboxes.count)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showExistingSandboxes {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        if existingSandboxes.isEmpty && !isLoadingSandboxes {
+                            Text(String(localized: "cloud.sandboxes.empty", defaultValue: "No existing sandboxes"))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .padding(.vertical, 8)
+                        } else {
+                            ForEach(existingSandboxes) { sandbox in
+                                sandboxRow(sandbox)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                }
+                .frame(height: min(CGFloat(max(existingSandboxes.count, 1)) * 44, 150))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func sandboxRow(_ sandbox: DaytonaSandbox) -> some View {
+        HStack(spacing: 8) {
+            // State indicator
+            Circle()
+                .fill(sandboxStateColor(sandbox.state))
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(sandbox.id.prefix(12) + "...")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(sandbox.state ?? "unknown")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    if let image = sandbox.image {
+                        Text(image.components(separatedBy: "/").last ?? image)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    } else if let snapshot = sandbox.snapshot {
+                        Text(snapshot)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Actions
+            if sandbox.state == "stopped" || sandbox.state == "archived" {
+                Button {
+                    deleteSandbox(sandbox.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "cloud.sandboxes.delete", defaultValue: "Delete sandbox"))
+            } else if sandbox.state == "running" || sandbox.state == "started" {
+                Button {
+                    stopSandbox(sandbox.id)
+                } label: {
+                    Image(systemName: "stop.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "cloud.sandboxes.stop", defaultValue: "Stop sandbox"))
+
+                Button {
+                    deleteSandbox(sandbox.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "cloud.sandboxes.delete", defaultValue: "Delete sandbox"))
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(nsColor: .separatorColor).opacity(0.08))
+        )
+    }
+
+    private func sandboxStateColor(_ state: String?) -> Color {
+        switch state {
+        case "running", "started": return .green
+        case "stopped", "archived": return .gray
+        case "creating", "starting": return .yellow
+        case "error": return .red
+        default: return .gray.opacity(0.5)
+        }
+    }
+
+    private func loadExistingSandboxes() {
+        guard let token = DaytonaAuthTokenStore.token() else { return }
+        isLoadingSandboxes = true
+        let api = DaytonaAPI(token: token)
+        Task {
+            do {
+                let all = try await api.listSandboxes()
+#if DEBUG
+                dlog("cloud.sandboxes.loaded total=\(all.count)")
+                for sb in all {
+                    dlog("cloud.sandboxes.item id=\(sb.id.prefix(12)) state=\(sb.state ?? "nil") labels=\(sb.labels ?? [:])")
+                }
+#endif
+                // Only show sandboxes created by cmux (tagged with cmux label)
+                let cmuxSandboxes = all.filter { $0.labels?["cmux"] != nil }
+#if DEBUG
+                dlog("cloud.sandboxes.filtered cmux=\(cmuxSandboxes.count)")
+#endif
+                await MainActor.run {
+                    existingSandboxes = cmuxSandboxes
+                    isLoadingSandboxes = false
+                }
+            } catch {
+#if DEBUG
+                dlog("cloud.sandboxes.loadError: \(error.localizedDescription)")
+#endif
+                await MainActor.run {
+                    isLoadingSandboxes = false
+                }
+            }
+        }
+    }
+
+    private func stopSandbox(_ id: String) {
+        guard let token = DaytonaAuthTokenStore.token() else { return }
+        let api = DaytonaAPI(token: token)
+        Task {
+            do {
+                try await api.stopSandbox(id: id)
+                // Refresh the list
+                loadExistingSandboxes()
+            } catch {
+#if DEBUG
+                dlog("cloud.sandboxes.stopError id=\(id): \(error.localizedDescription)")
+#endif
+            }
+        }
+    }
+
+    private func deleteSandbox(_ id: String) {
+        guard let token = DaytonaAuthTokenStore.token() else { return }
+        let api = DaytonaAPI(token: token)
+        // Optimistically remove from UI
+        existingSandboxes.removeAll { $0.id == id }
+        Task {
+            do {
+                try await api.deleteSandbox(id: id)
+            } catch {
+#if DEBUG
+                dlog("cloud.sandboxes.deleteError id=\(id): \(error.localizedDescription)")
+#endif
+                // Refresh to restore state
+                loadExistingSandboxes()
+            }
         }
     }
 

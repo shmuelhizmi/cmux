@@ -98,6 +98,7 @@ enum DaytonaCloudMachineState: String, Codable, Sendable {
     case starting
     case waitingForSSH
     case connecting
+    case settingUpDevContainer
     case cloningRepository
     case ready
     case stopping

@@ -410,7 +410,7 @@ struct WorkspaceContentView: View {
     private var shouldShowProvisioningOverlay: Bool {
         guard workspace.cloudConfiguration != nil else { return false }
         switch workspace.cloudMachineState {
-        case .creating, .starting, .waitingForSSH, .connecting, .cloningRepository, .error:
+        case .creating, .starting, .waitingForSSH, .connecting, .settingUpDevContainer, .cloningRepository, .error:
             return true
         default:
             return false

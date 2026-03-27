@@ -11,6 +11,9 @@ struct DevContainerConfig: Codable, Equatable, Sendable {
     var remoteEnv: [String: String]?
     var postCreateCommand: DevContainerCommand?
     var build: DevContainerBuild?
+    /// Shell script generated from Dockerfile RUN/ENV/USER commands.
+    /// Runs on the sandbox to replicate the Dockerfile environment.
+    var dockerfileSetupScript: String?
 }
 
 // MARK: - Nested Types
@@ -90,18 +93,26 @@ extension DevContainerConfig {
             do {
                 var config = try JSONDecoder().decode(DevContainerConfig.self, from: cleaned)
 
-                // When there's a Dockerfile but no image, extract the FROM image
-                // so Daytona can at least use the base image.
-                if config.image == nil, let dockerfile = config.build?.dockerfile {
+                // When there's a Dockerfile, extract the FROM base image and generate
+                // a setup script from the RUN/ENV/USER directives.
+                if let dockerfile = config.build?.dockerfile {
                     let devcontainerDir = (path as NSString).deletingLastPathComponent
                     let context = config.build?.context ?? "."
                     let contextDir = (devcontainerDir as NSString).appendingPathComponent(context)
                     let dockerfilePath = (contextDir as NSString).appendingPathComponent(dockerfile)
-                    if let fromImage = extractDockerfileFromImage(atPath: dockerfilePath) {
+                    if config.image == nil,
+                       let fromImage = extractDockerfileFromImage(atPath: dockerfilePath) {
 #if DEBUG
                         dlog("devcontainer.dockerfile.from path=\(dockerfilePath) image=\(fromImage)")
 #endif
                         config.image = fromImage
+                    }
+                    // Parse Dockerfile commands into a setup script
+                    if let setupScript = parseDockerfileSetupScript(atPath: dockerfilePath) {
+#if DEBUG
+                        dlog("devcontainer.dockerfile.setupScript lines=\(setupScript.components(separatedBy: .newlines).count)")
+#endif
+                        config.dockerfileSetupScript = setupScript
                     }
                 }
 
@@ -114,6 +125,112 @@ extension DevContainerConfig {
             }
         }
         return nil
+    }
+
+    /// Parses a Dockerfile and generates a shell setup script from its RUN, ENV, USER, and WORKDIR
+    /// directives. Root-phase commands are wrapped in `sudo bash`, user-phase commands run directly.
+    /// Hardcoded user home paths (e.g. `/home/vscode`) are replaced with `$HOME`.
+    static func parseDockerfileSetupScript(atPath path: String) -> String? {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+
+        struct Directive {
+            enum Kind { case run, user, env, workdir }
+            let kind: Kind
+            let content: String
+        }
+
+        // Parse Dockerfile into directives
+        var directives: [Directive] = []
+        let rawLines = content.components(separatedBy: .newlines)
+        var i = 0
+        while i < rawLines.count {
+            var line = rawLines[i].trimmingCharacters(in: .whitespaces)
+            i += 1
+
+            // Skip comments and empty lines
+            if line.isEmpty || line.hasPrefix("#") { continue }
+
+            // Handle multi-line continuations
+            while line.hasSuffix("\\") && i < rawLines.count {
+                line = String(line.dropLast()) + " " + rawLines[i].trimmingCharacters(in: .whitespaces)
+                i += 1
+            }
+
+            let upper = line.uppercased()
+            if upper.hasPrefix("RUN ") {
+                directives.append(Directive(kind: .run, content: String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)))
+            } else if upper.hasPrefix("USER ") {
+                directives.append(Directive(kind: .user, content: String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)))
+            } else if upper.hasPrefix("ENV ") {
+                directives.append(Directive(kind: .env, content: String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)))
+            } else if upper.hasPrefix("WORKDIR ") {
+                directives.append(Directive(kind: .workdir, content: String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces)))
+            }
+            // Skip FROM, COPY, ADD, CMD, ENTRYPOINT, EXPOSE, LABEL, ARG
+        }
+
+        guard !directives.isEmpty else { return nil }
+
+        // Detect the non-root username from USER directives (to replace home paths)
+        let nonRootUser = directives.first(where: { $0.kind == .user && $0.content != "root" })?.content
+
+        // Build the setup script
+        var currentUser = "root"
+        var rootCommands: [String] = []
+        var userCommands: [String] = []
+
+        func replaceHomePaths(_ cmd: String) -> String {
+            guard let user = nonRootUser else { return cmd }
+            return cmd.replacingOccurrences(of: "/home/\(user)", with: "$HOME")
+        }
+
+        for directive in directives {
+            switch directive.kind {
+            case .user:
+                currentUser = directive.content
+            case .env:
+                let replaced = replaceHomePaths(directive.content)
+                if currentUser == "root" {
+                    rootCommands.append("export \(replaced)")
+                } else {
+                    userCommands.append("export \(replaced)")
+                }
+            case .workdir:
+                let replaced = replaceHomePaths(directive.content)
+                if currentUser == "root" {
+                    rootCommands.append("mkdir -p \(replaced) && cd \(replaced)")
+                } else {
+                    userCommands.append("mkdir -p \(replaced) 2>/dev/null; cd \(replaced)")
+                }
+            case .run:
+                let replaced = replaceHomePaths(directive.content)
+                if currentUser == "root" {
+                    rootCommands.append(replaced)
+                } else {
+                    userCommands.append(replaced)
+                }
+            }
+        }
+
+        var script = "#!/bin/bash\nset -e\nexport DEBIAN_FRONTEND=noninteractive\n"
+        script += "echo \"Setting up dev container environment...\"\n\n"
+
+        if !rootCommands.isEmpty {
+            script += "# Root-phase commands from Dockerfile\n"
+            script += "sudo bash <<'__DEVCONTAINER_ROOT__'\n"
+            script += "set -e\nexport DEBIAN_FRONTEND=noninteractive\n"
+            script += rootCommands.joined(separator: "\n")
+            script += "\n__DEVCONTAINER_ROOT__\n\n"
+        }
+
+        if !userCommands.isEmpty {
+            script += "# User-phase commands from Dockerfile\n"
+            script += userCommands.joined(separator: "\n")
+            script += "\n\n"
+        }
+
+        script += "echo \"Dev container setup complete\""
+        return script
     }
 
     /// Extracts the base image from a Dockerfile's first `FROM` instruction.

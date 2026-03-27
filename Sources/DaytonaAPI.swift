@@ -22,6 +22,14 @@ struct DaytonaAPI: Sendable {
 
     // MARK: - Sandbox Lifecycle
 
+    func listSandboxes(label: String? = nil) async throws -> [DaytonaSandbox] {
+        var queryItems: [URLQueryItem] = []
+        if let label {
+            queryItems.append(URLQueryItem(name: "label", value: label))
+        }
+        return try await get(path: "/sandbox", queryItems: queryItems.isEmpty ? nil : queryItems)
+    }
+
     func createSandbox(request: DaytonaSandboxCreateRequest) async throws -> DaytonaSandbox {
         try await post(path: "/sandbox", body: request)
     }
@@ -220,14 +228,18 @@ struct DaytonaSandboxCreateRequest: Encodable {
 
 // MARK: - Response Models
 
-struct DaytonaSandbox: Decodable {
+struct DaytonaSandbox: Decodable, Identifiable {
     let id: String
     let state: String?
     let snapshot: String?
+    let image: String?
     let region: String?
     let cpu: Int?
     let memory: Int?
     let disk: Int?
+    let labels: [String: String]?
+    let createdAt: String?
+    let updatedAt: String?
 }
 
 struct DaytonaSSHAccess: Decodable {

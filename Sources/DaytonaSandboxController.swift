@@ -172,6 +172,27 @@ final class DaytonaSandboxController {
 
             try Task.checkCancellation()
 
+            // Step 4b: Run Dockerfile setup script (if devcontainer has a Dockerfile)
+            if let setupScript = configuration.devContainer?.dockerfileSetupScript, !setupScript.isEmpty {
+                currentStep = "Setting up dev container"
+                workspace.cloudMachineState = .settingUpDevContainer
+                workspace.cloudMachineStepOutput = "Running Dockerfile setup commands..."
+#if DEBUG
+                dlog("daytona.provision step4b.devcontainerSetup scriptLen=\(setupScript.count)")
+#endif
+                try await runSSHCommand(
+                    setupScript,
+                    sshToken: sshAccess.token,
+                    workspace: workspace
+                )
+                workspace.cloudMachineStepOutput = "Dev container ready"
+#if DEBUG
+                dlog("daytona.provision step4b.devcontainerSetup done")
+#endif
+            }
+
+            try Task.checkCancellation()
+
             // Step 5: Clone repository via SSH (not in the terminal)
 #if DEBUG
             dlog("daytona.provision step5.check hasScript=\(configuration.gitSetupScript != nil) scriptLen=\(configuration.gitSetupScript?.count ?? 0)")
