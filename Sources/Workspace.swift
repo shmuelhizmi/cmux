@@ -4317,48 +4317,75 @@ final class WorkspaceRemoteSessionController {
             "remote.upload.begin local=\(localBinary.path) remoteTemp=\(remoteTempPath) remote=\(remotePath)"
         )
 
-        let mkdirScript = "mkdir -p \(Self.shellSingleQuoted(remoteDirectory))"
+        let mkdirScript = "mkdir -p \(Self.shellSingleQuoted(remoteDirectory)) && echo __CMUX_OK__"
         let mkdirCommand = "sh -c \(Self.shellSingleQuoted(mkdirScript))"
         let mkdirResult = try sshExec(arguments: sshCommonArguments(batchMode: true) + [configuration.destination, mkdirCommand], timeout: 12)
-        guard mkdirResult.status == 0 else {
+        // SSH proxies (e.g. Daytona) may return exit 255 even on success; verify via stdout marker.
+        let mkdirOK = mkdirResult.status == 0 || (configuration.uploadViaSSHPipe && mkdirResult.stdout.contains("__CMUX_OK__"))
+        guard mkdirOK else {
             let detail = Self.bestErrorLine(stderr: mkdirResult.stderr, stdout: mkdirResult.stdout) ?? "ssh exited \(mkdirResult.status)"
             throw NSError(domain: "cmux.remote.daemon", code: 30, userInfo: [
                 NSLocalizedDescriptionKey: "failed to create remote daemon directory: \(detail)",
             ])
         }
 
-        let scpSSHOptions = backgroundSSHOptions(configuration.sshOptions)
-        var scpArgs: [String] = ["-q"]
-        if !hasSSHOptionKey(scpSSHOptions, key: "StrictHostKeyChecking") {
-            scpArgs += ["-o", "StrictHostKeyChecking=accept-new"]
-        }
-        scpArgs += ["-o", "ControlMaster=no"]
-        if let port = configuration.port {
-            scpArgs += ["-P", String(port)]
-        }
-        if let identityFile = configuration.identityFile,
-           !identityFile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            scpArgs += ["-i", identityFile]
-        }
-        for option in scpSSHOptions {
-            scpArgs += ["-o", option]
-        }
-        scpArgs += [localBinary.path, "\(configuration.destination):\(remoteTempPath)"]
-        let scpResult = try scpExec(arguments: scpArgs, timeout: 45)
-        guard scpResult.status == 0 else {
-            let detail = Self.bestErrorLine(stderr: scpResult.stderr, stdout: scpResult.stdout) ?? "scp exited \(scpResult.status)"
-            throw NSError(domain: "cmux.remote.daemon", code: 31, userInfo: [
-                NSLocalizedDescriptionKey: "failed to upload cmuxd-remote: \(detail)",
-            ])
+        debugLog("remote.upload.method uploadViaSSHPipe=\(configuration.uploadViaSSHPipe)")
+        if configuration.uploadViaSSHPipe {
+            // Upload via SSH stdin + python3 receiver — for proxies (e.g. Daytona) that
+            // don't support SCP and don't relay stdin EOF (so plain `cat > file` hangs).
+            // python3 reads exactly N bytes from stdin.buffer, avoiding the EOF issue.
+            // Note: Daytona's SSH proxy may return exit code 255 even on success,
+            // so we verify by checking stdout for the expected byte count.
+            let fileData = try Data(contentsOf: localBinary)
+            let escapedPath = remoteTempPath.replacingOccurrences(of: "\"", with: "\\\"")
+            let command = "python3 -c \"import sys;d=sys.stdin.buffer.read(\(fileData.count));open('\(escapedPath)','wb').write(d);print(len(d))\""
+            let uploadResult = try sshExec(
+                arguments: sshCommonArguments(batchMode: true) + [configuration.destination, command],
+                stdin: fileData,
+                timeout: 60
+            )
+            let writtenBytes = Int(uploadResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+            if writtenBytes != fileData.count {
+                let detail = Self.bestErrorLine(stderr: uploadResult.stderr, stdout: uploadResult.stdout) ?? "ssh pipe exited \(uploadResult.status)"
+                throw NSError(domain: "cmux.remote.daemon", code: 31, userInfo: [
+                    NSLocalizedDescriptionKey: "failed to upload cmuxd-remote via SSH pipe: \(detail) (expected \(fileData.count) bytes, got \(writtenBytes ?? -1))",
+                ])
+            }
+        } else {
+            let scpSSHOptions = backgroundSSHOptions(configuration.sshOptions)
+            var scpArgs: [String] = ["-q"]
+            if !hasSSHOptionKey(scpSSHOptions, key: "StrictHostKeyChecking") {
+                scpArgs += ["-o", "StrictHostKeyChecking=accept-new"]
+            }
+            scpArgs += ["-o", "ControlMaster=no"]
+            if let port = configuration.port {
+                scpArgs += ["-P", String(port)]
+            }
+            if let identityFile = configuration.identityFile,
+               !identityFile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                scpArgs += ["-i", identityFile]
+            }
+            for option in scpSSHOptions {
+                scpArgs += ["-o", option]
+            }
+            scpArgs += [localBinary.path, "\(configuration.destination):\(remoteTempPath)"]
+            let scpResult = try scpExec(arguments: scpArgs, timeout: 45)
+            guard scpResult.status == 0 else {
+                let detail = Self.bestErrorLine(stderr: scpResult.stderr, stdout: scpResult.stdout) ?? "scp exited \(scpResult.status)"
+                throw NSError(domain: "cmux.remote.daemon", code: 31, userInfo: [
+                    NSLocalizedDescriptionKey: "failed to upload cmuxd-remote: \(detail)",
+                ])
+            }
         }
 
         let finalizeScript = """
         chmod 755 \(Self.shellSingleQuoted(remoteTempPath)) && \
-        mv \(Self.shellSingleQuoted(remoteTempPath)) \(Self.shellSingleQuoted(remotePath))
+        mv \(Self.shellSingleQuoted(remoteTempPath)) \(Self.shellSingleQuoted(remotePath)) && echo __CMUX_OK__
         """
         let finalizeCommand = "sh -c \(Self.shellSingleQuoted(finalizeScript))"
         let finalizeResult = try sshExec(arguments: sshCommonArguments(batchMode: true) + [configuration.destination, finalizeCommand], timeout: 12)
-        guard finalizeResult.status == 0 else {
+        let finalizeOK = finalizeResult.status == 0 || (configuration.uploadViaSSHPipe && finalizeResult.stdout.contains("__CMUX_OK__"))
+        guard finalizeOK else {
             let detail = Self.bestErrorLine(stderr: finalizeResult.stderr, stdout: finalizeResult.stdout) ?? "ssh exited \(finalizeResult.status)"
             throw NSError(domain: "cmux.remote.daemon", code: 32, userInfo: [
                 NSLocalizedDescriptionKey: "failed to install remote daemon binary: \(detail)",
@@ -4435,7 +4462,10 @@ final class WorkspaceRemoteSessionController {
         let script = "printf '%s\\n' \(Self.shellSingleQuoted(request)) | \(Self.shellSingleQuoted(remotePath)) serve --stdio"
         let command = "sh -c \(Self.shellSingleQuoted(script))"
         let result = try sshExec(arguments: sshCommonArguments(batchMode: true) + [configuration.destination, command], timeout: 12)
-        guard result.status == 0 else {
+        // SSH proxies (e.g. Daytona) may return exit 255 even when the command produced valid output.
+        // If stdout contains a JSON response, proceed with parsing regardless of exit code.
+        let hasStdout = !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if result.status != 0 && !hasStdout {
             let detail = Self.bestErrorLine(stderr: result.stderr, stdout: result.stdout) ?? "ssh exited \(result.status)"
             throw NSError(domain: "cmux.remote.daemon", code: 40, userInfo: [
                 NSLocalizedDescriptionKey: "failed to start remote daemon: \(detail)",
@@ -4888,6 +4918,9 @@ struct WorkspaceRemoteConfiguration: Equatable {
     let relayToken: String?
     let localSocketPath: String?
     let terminalStartupCommand: String?
+    /// When true, file uploads use `ssh ... "cat > path" < file` instead of `scp`.
+    /// Required for SSH proxies (e.g. Daytona) that don't support the SCP protocol.
+    var uploadViaSSHPipe: Bool = false
 
     var displayTarget: String {
         guard let port else { return destination }

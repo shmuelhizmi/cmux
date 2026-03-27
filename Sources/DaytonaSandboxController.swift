@@ -223,7 +223,8 @@ final class DaytonaSandboxController {
             relayID: nil,
             relayToken: nil,
             localSocketPath: nil,
-            terminalStartupCommand: startupCommand
+            terminalStartupCommand: startupCommand,
+            uploadViaSSHPipe: true
         )
     }
     // MARK: - Helpers
