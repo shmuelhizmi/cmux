@@ -53,6 +53,17 @@ enum CloudMachineSettings {
     static let diskSteps = [10, 20, 50, 100]
 }
 
+// MARK: - Doppler Integration
+
+struct DopplerIntegrationConfig: Codable, Equatable, Sendable {
+    /// The Doppler service token (dp.st.xxx format).
+    let serviceToken: String
+    /// The project name (for display only; the token encodes project+config).
+    let project: String?
+    /// The config name (for display only).
+    let config: String?
+}
+
 // MARK: - Cloud Configuration
 
 struct DaytonaCloudConfiguration: Codable, Equatable, Sendable {
@@ -74,13 +85,17 @@ struct DaytonaCloudConfiguration: Codable, Equatable, Sendable {
     /// Parsed `.devcontainer/devcontainer.json` from the local repo, if present.
     var devContainer: DevContainerConfig?
 
+    /// Optional Doppler secrets integration.
+    var doppler: DopplerIntegrationConfig?
+
     init(
         sandboxSpec: DaytonaCloudSandboxSpec = .default,
         gitSetupScript: String? = nil,
         workspaceLabel: String? = nil,
         resolvedSandboxID: String? = nil,
         autoStopInterval: Int? = nil,
-        devContainer: DevContainerConfig? = nil
+        devContainer: DevContainerConfig? = nil,
+        doppler: DopplerIntegrationConfig? = nil
     ) {
         self.sandboxSpec = sandboxSpec
         self.gitSetupScript = gitSetupScript
@@ -88,6 +103,7 @@ struct DaytonaCloudConfiguration: Codable, Equatable, Sendable {
         self.resolvedSandboxID = resolvedSandboxID
         self.autoStopInterval = autoStopInterval
         self.devContainer = devContainer
+        self.doppler = doppler
     }
 }
 
@@ -100,6 +116,7 @@ enum DaytonaCloudMachineState: String, Codable, Sendable {
     case connecting
     case settingUpDevContainer
     case cloningRepository
+    case settingUpDoppler
     case ready
     case stopping
     case stopped
@@ -191,6 +208,17 @@ extension DaytonaCloudConfiguration {
         default:
             return ""
         }
+    }
+
+    /// Builds a shell script that writes `DOPPLER_TOKEN` to shell profiles on the sandbox.
+    static func buildDopplerSetupScript(token: String) -> String {
+        let escaped = shellEscape(token)
+        return """
+        echo "export DOPPLER_TOKEN=\(escaped)" >> ~/.bashrc
+        echo "export DOPPLER_TOKEN=\(escaped)" >> ~/.profile
+        export DOPPLER_TOKEN=\(escaped)
+        echo "Doppler configured"
+        """
     }
 
     private static func shellEscape(_ s: String) -> String {

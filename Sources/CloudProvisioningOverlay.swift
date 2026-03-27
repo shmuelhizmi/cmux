@@ -106,11 +106,12 @@ struct CloudProvisioningOverlay: View {
             (String(localized: "cloud.step.connecting", defaultValue: "Connecting to sandbox..."), .connecting),
             (String(localized: "cloud.step.devcontainer", defaultValue: "Setting up dev container..."), .settingUpDevContainer),
             (String(localized: "cloud.step.cloning", defaultValue: "Cloning repository..."), .cloningRepository),
+            (String(localized: "cloud.step.doppler", defaultValue: "Configuring secrets..."), .settingUpDoppler),
             (String(localized: "cloud.step.ready", defaultValue: "Ready"), .ready),
         ]
 
         let stateOrder: [DaytonaCloudMachineState] = [
-            .creating, .starting, .waitingForSSH, .connecting, .settingUpDevContainer, .cloningRepository, .ready,
+            .creating, .starting, .waitingForSSH, .connecting, .settingUpDevContainer, .cloningRepository, .settingUpDoppler, .ready,
         ]
 
         // For error state, use the step where the error occurred

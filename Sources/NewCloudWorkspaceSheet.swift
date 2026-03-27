@@ -88,6 +88,18 @@ struct NewCloudWorkspaceSheet: View {
     @State private var isLoadingSandboxes: Bool = false
     @State private var showExistingSandboxes: Bool = false
 
+    // Doppler integration
+    @State private var isDopplerAvailable: Bool = false
+    @State private var showDopplerSettings: Bool = false
+    @State private var dopplerMode: Int = 0 // 0 = project/config, 1 = manual token
+    @State private var dopplerProjects: [DopplerService.DopplerProject] = []
+    @State private var dopplerConfigs: [DopplerService.DopplerConfig] = []
+    @State private var selectedDopplerProject: String? = nil
+    @State private var selectedDopplerConfig: String? = nil
+    @State private var dopplerTokenInput: String = ""
+    @State private var isLoadingDopplerProjects: Bool = false
+    @State private var isLoadingDopplerConfigs: Bool = false
+
     @AppStorage(CloudMachineSettings.cpuKey) private var cpuSetting = CloudMachineSettings.defaultCPU
     @AppStorage(CloudMachineSettings.memoryKey) private var memorySetting = CloudMachineSettings.defaultMemory
     @AppStorage(CloudMachineSettings.diskKey) private var diskSetting = CloudMachineSettings.defaultDisk
@@ -198,6 +210,9 @@ struct NewCloudWorkspaceSheet: View {
 
                 // Machine settings
                 machineSettingsSection
+
+                // Doppler secrets
+                dopplerSettingsSection
 
                 // Existing sandboxes
                 existingSandboxesSection
@@ -769,7 +784,7 @@ struct NewCloudWorkspaceSheet: View {
             mode: "import_branch", repoURL: repoURL, branchName: name,
             githubToken: githubToken
         )
-        let config = buildConfig(gitSetupScript: script)
+        guard let config = buildConfig(gitSetupScript: script) else { return }
 #if DEBUG
         dlog("cloud.modal.submitBranch calling onSubmit appName=\(config.sandboxSpec.snapshot ?? "default")")
 #endif
@@ -791,7 +806,7 @@ struct NewCloudWorkspaceSheet: View {
             githubToken: githubToken
         )
         let label = "#\(number) \(title)"
-        let config = buildConfig(gitSetupScript: script)
+        guard let config = buildConfig(gitSetupScript: script) else { return }
 #if DEBUG
         dlog("cloud.modal.submitPR calling onSubmit appName=\(config.sandboxSpec.snapshot ?? "default")")
 #endif
@@ -809,7 +824,7 @@ struct NewCloudWorkspaceSheet: View {
             newBranchName: name,
             githubToken: githubToken
         )
-        let config = buildConfig(gitSetupScript: script)
+        guard let config = buildConfig(gitSetupScript: script) else { return }
         onSubmit(config, name)
     }
 
@@ -822,13 +837,190 @@ struct NewCloudWorkspaceSheet: View {
         return nil
     }
 
-    private func buildConfig(gitSetupScript: String) -> DaytonaCloudConfiguration {
-        DaytonaCloudConfiguration(
+    private func buildConfig(gitSetupScript: String) -> DaytonaCloudConfiguration? {
+        var dopplerCfg: DopplerIntegrationConfig?
+        if showDopplerSettings {
+            if dopplerMode == 1 {
+                let token = dopplerTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !token.isEmpty {
+                    dopplerCfg = DopplerIntegrationConfig(serviceToken: token, project: nil, config: nil)
+                }
+            } else if let project = selectedDopplerProject, let config = selectedDopplerConfig {
+                let tokenName = "cmux-\(Int(Date().timeIntervalSince1970))"
+                if let token = DopplerService.createServiceToken(project: project, config: config, name: tokenName) {
+                    dopplerCfg = DopplerIntegrationConfig(serviceToken: token, project: project, config: config)
+                } else {
+                    errorMessage = String(localized: "cloud.doppler.tokenCreateFail", defaultValue: "Failed to create Doppler service token")
+                    return nil
+                }
+            }
+        }
+        return DaytonaCloudConfiguration(
             sandboxSpec: .fromSettings(),
             gitSetupScript: gitSetupScript,
             autoStopInterval: 1440,
-            devContainer: detectedDevContainer
+            devContainer: detectedDevContainer,
+            doppler: dopplerCfg
         )
+    }
+
+    // MARK: - Doppler Settings
+
+    private var dopplerSettingsSection: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showDopplerSettings.toggle()
+                    if showDopplerSettings && dopplerMode == 0 && dopplerProjects.isEmpty && !isLoadingDopplerProjects {
+                        loadDopplerProjects()
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showDopplerSettings ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 12)
+                    Text(String(localized: "cloud.doppler.title", defaultValue: "Secrets"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(dopplerSettingSummary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showDopplerSettings {
+                VStack(spacing: 10) {
+                    Picker("", selection: $dopplerMode) {
+                        Text(String(localized: "cloud.doppler.projectConfig", defaultValue: "Project / Config")).tag(0)
+                        Text(String(localized: "cloud.doppler.serviceToken", defaultValue: "Service Token")).tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: dopplerMode) { _, newValue in
+                        if newValue == 0 && dopplerProjects.isEmpty && !isLoadingDopplerProjects {
+                            loadDopplerProjects()
+                        }
+                    }
+
+                    if dopplerMode == 0 {
+                        if !isDopplerAvailable {
+                            Text(String(localized: "cloud.doppler.installHint", defaultValue: "Install the doppler CLI to select project/config"))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            HStack(spacing: 8) {
+                                Text(String(localized: "cloud.doppler.project", defaultValue: "Project"))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 50, alignment: .leading)
+                                if isLoadingDopplerProjects {
+                                    ProgressView().controlSize(.small)
+                                    Spacer()
+                                } else {
+                                    Picker("", selection: Binding(
+                                        get: { selectedDopplerProject ?? "" },
+                                        set: { newValue in
+                                            selectedDopplerProject = newValue.isEmpty ? nil : newValue
+                                            selectedDopplerConfig = nil
+                                            dopplerConfigs = []
+                                            if !newValue.isEmpty {
+                                                loadDopplerConfigs(project: newValue)
+                                            }
+                                        }
+                                    )) {
+                                        Text("--").tag("")
+                                        ForEach(dopplerProjects, id: \.id) { project in
+                                            Text(project.name).tag(project.name)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                Text(String(localized: "cloud.doppler.config", defaultValue: "Config"))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 50, alignment: .leading)
+                                if isLoadingDopplerConfigs {
+                                    ProgressView().controlSize(.small)
+                                    Spacer()
+                                } else {
+                                    Picker("", selection: Binding(
+                                        get: { selectedDopplerConfig ?? "" },
+                                        set: { selectedDopplerConfig = $0.isEmpty ? nil : $0 }
+                                    )) {
+                                        Text("--").tag("")
+                                        ForEach(dopplerConfigs, id: \.name) { config in
+                                            Text(config.name).tag(config.name)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .disabled(selectedDopplerProject == nil)
+                                }
+                            }
+                        }
+                    } else {
+                        SecureField(
+                            String(localized: "cloud.doppler.tokenPlaceholder", defaultValue: "Paste service token (dp.st.xxx)..."),
+                            text: $dopplerTokenInput
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var dopplerSettingSummary: String {
+        if !showDopplerSettings {
+            return String(localized: "cloud.doppler.disabled", defaultValue: "Disabled")
+        }
+        if dopplerMode == 1 {
+            let token = dopplerTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            return token.isEmpty
+                ? String(localized: "cloud.doppler.disabled", defaultValue: "Disabled")
+                : String(localized: "cloud.doppler.tokenSet", defaultValue: "Token")
+        }
+        if let project = selectedDopplerProject, let config = selectedDopplerConfig {
+            return "\(project) / \(config)"
+        }
+        return String(localized: "cloud.doppler.disabled", defaultValue: "Disabled")
+    }
+
+    private func loadDopplerProjects() {
+        guard isDopplerAvailable else { return }
+        isLoadingDopplerProjects = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let projects = DopplerService.listProjects()
+            DispatchQueue.main.async {
+                dopplerProjects = projects
+                isLoadingDopplerProjects = false
+            }
+        }
+    }
+
+    private func loadDopplerConfigs(project: String) {
+        isLoadingDopplerConfigs = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let configs = DopplerService.listConfigs(project: project)
+            DispatchQueue.main.async {
+                dopplerConfigs = configs
+                isLoadingDopplerConfigs = false
+            }
+        }
     }
 
     // MARK: - Data Loading
@@ -864,12 +1056,16 @@ struct NewCloudWorkspaceSheet: View {
             // Get GitHub token for private repo auth
             let ghToken = Self.fetchGitHubToken()
 
+            // Check if Doppler CLI is available locally
+            let dopplerAvailable = DopplerService.isAvailable()
+
             DispatchQueue.main.async {
                 detectedRepoSlug = slug
                 detectedRepoURL = repoURL
                 detectedHead = head
                 detectedDevContainer = devContainer
                 githubToken = ghToken
+                isDopplerAvailable = dopplerAvailable
 
                 var allItems: [CloudWorkspaceItem] = []
                 allItems.append(contentsOf: prs)

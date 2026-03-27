@@ -221,6 +221,30 @@ final class DaytonaSandboxController {
                 workspace.cloudMachineStepOutput = "Repository ready"
             }
 
+            try Task.checkCancellation()
+
+            // Step 6: Configure Doppler secrets (if enabled)
+            if let dopplerConfig = configuration.doppler {
+                currentStep = "Configuring secrets"
+                workspace.cloudMachineState = .settingUpDoppler
+                workspace.cloudMachineStepOutput = "Setting up Doppler..."
+#if DEBUG
+                dlog("daytona.provision step6.dopplerBegin tokenPrefix=\(dopplerConfig.serviceToken.prefix(12))...")
+#endif
+                let dopplerScript = DaytonaCloudConfiguration.buildDopplerSetupScript(
+                    token: dopplerConfig.serviceToken
+                )
+                try await runSSHCommand(
+                    dopplerScript,
+                    sshToken: sshAccess.token,
+                    workspace: workspace
+                )
+                workspace.cloudMachineStepOutput = "Secrets configured"
+#if DEBUG
+                dlog("daytona.provision step6.dopplerDone")
+#endif
+            }
+
             workspace.cloudMachineStepOutput = nil
 #if DEBUG
             dlog("daytona.provision settingReady wsId=\(workspace.id) currentState=\(workspace.cloudMachineState.rawValue) hasCloudConfig=\(workspace.cloudConfiguration != nil)")
@@ -285,6 +309,9 @@ final class DaytonaSandboxController {
         }
         if let remoteEnv = dc?.remoteEnv {
             env.merge(remoteEnv) { _, new in new }
+        }
+        if let dopplerConfig = configuration.doppler {
+            env["DOPPLER_TOKEN"] = dopplerConfig.serviceToken
         }
 
         // Use devcontainer image when available.
