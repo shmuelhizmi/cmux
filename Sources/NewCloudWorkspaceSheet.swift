@@ -81,6 +81,7 @@ struct NewCloudWorkspaceSheet: View {
     @State private var errorMessage: String?
     @State private var needsApiKey: Bool = DaytonaAuthTokenStore.token() == nil
     @State private var apiKeyInput: String = ""
+    @State private var detectedDevContainer: DevContainerConfig?
 
     private var filteredItems: [CloudWorkspaceItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -510,7 +511,9 @@ struct NewCloudWorkspaceSheet: View {
     private func buildConfig(gitSetupScript: String) -> DaytonaCloudConfiguration {
         DaytonaCloudConfiguration(
             sandboxSpec: .default,
-            gitSetupScript: gitSetupScript
+            gitSetupScript: gitSetupScript,
+            autoStopInterval: 1440,
+            devContainer: detectedDevContainer
         )
     }
 
@@ -541,10 +544,14 @@ struct NewCloudWorkspaceSheet: View {
                 prs = Self.fetchOpenPRs(repoSlug: slug)
             }
 
+            // Detect devcontainer config
+            let devContainer = DevContainerConfig.detect(inDirectory: dir)
+
             DispatchQueue.main.async {
                 detectedRepoSlug = slug
                 detectedRepoURL = repoURL
                 detectedHead = head
+                detectedDevContainer = devContainer
 
                 var allItems: [CloudWorkspaceItem] = []
                 allItems.append(contentsOf: prs)

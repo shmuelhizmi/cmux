@@ -38,18 +38,23 @@ struct DaytonaCloudConfiguration: Codable, Equatable, Sendable {
     /// Auto-stop interval in minutes (0 = never).
     var autoStopInterval: Int?
 
+    /// Parsed `.devcontainer/devcontainer.json` from the local repo, if present.
+    var devContainer: DevContainerConfig?
+
     init(
         sandboxSpec: DaytonaCloudSandboxSpec = .default,
         gitSetupScript: String? = nil,
         workspaceLabel: String? = nil,
         resolvedSandboxID: String? = nil,
-        autoStopInterval: Int? = nil
+        autoStopInterval: Int? = nil,
+        devContainer: DevContainerConfig? = nil
     ) {
         self.sandboxSpec = sandboxSpec
         self.gitSetupScript = gitSetupScript
         self.workspaceLabel = workspaceLabel
         self.resolvedSandboxID = resolvedSandboxID
         self.autoStopInterval = autoStopInterval
+        self.devContainer = devContainer
     }
 }
 

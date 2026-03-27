@@ -160,18 +160,37 @@ final class DaytonaSandboxController {
 
     private func createSandbox() async throws -> DaytonaSandbox {
         let spec = configuration.sandboxSpec
+        let dc = configuration.devContainer
+
+        var env: [String: String] = [
+            "CMUX_CLOUD": "1",
+            "SHELL": "/bin/bash",
+            "USER": "daytona",
+            "TERM": "xterm-256color",
+        ]
+        if let containerEnv = dc?.containerEnv {
+            env.merge(containerEnv) { _, new in new }
+        }
+        if let remoteEnv = dc?.remoteEnv {
+            env.merge(remoteEnv) { _, new in new }
+        }
+
+        // Use devcontainer image when available (and no Dockerfile build required)
+        let useImage = dc?.image != nil && dc?.build?.dockerfile == nil
+#if DEBUG
+        if let dc {
+            dlog("daytona.provision devcontainer image=\(dc.image ?? "nil") build.dockerfile=\(dc.build?.dockerfile ?? "nil") useImage=\(useImage)")
+        }
+#endif
+
         let request = DaytonaSandboxCreateRequest(
             cpu: spec.cpu,
             memory: spec.memory,
             disk: spec.disk,
-            env: [
-                "CMUX_CLOUD": "1",
-                "SHELL": "/bin/bash",
-                "USER": "daytona",
-                "TERM": "xterm-256color",
-            ],
+            image: useImage ? dc?.image : nil,
+            env: env,
             labels: ["cmux": "true"],
-            snapshot: spec.snapshot,
+            snapshot: useImage ? nil : spec.snapshot,
             language: spec.language,
             region: spec.region,
             autostopTimeoutMinutes: configuration.autoStopInterval
@@ -230,12 +249,20 @@ final class DaytonaSandboxController {
         // Daytona's SSH proxy does NOT allocate a PTY even with ssh -tt.
         // Use `script -qc "..." /dev/null` on the remote to force PTY allocation
         // so that bash gets an interactive terminal with prompt, colors, etc.
+        // Append devcontainer postCreateCommand to git setup if present
+        let postCreate = configuration.devContainer?.postCreateCommand?.shellString
+
         let startupCommand: String
         if let script = configuration.gitSetupScript, !script.isEmpty {
             // SSH into sandbox, run the git setup, then start an interactive login shell.
             // For the initial terminal, the setup runs (clone etc.).
             // For subsequent terminals, the clone is already done so the cd succeeds and the shell starts.
-            let remoteScript = "cd /home/daytona/repo 2>/dev/null || { " + script + " && cd /home/daytona/repo 2>/dev/null; }; exec script -qc \"/bin/bash --login\" /dev/null"
+            var remoteBody = "cd /home/daytona/repo 2>/dev/null || { " + script + " && cd /home/daytona/repo 2>/dev/null; }"
+            if let postCreate {
+                // Run postCreateCommand once (guard with a marker file)
+                remoteBody += "; if [ ! -f /tmp/.cmux-postcreate-done ]; then " + postCreate + " && touch /tmp/.cmux-postcreate-done; fi"
+            }
+            let remoteScript = remoteBody + "; exec script -qc \"/bin/bash --login\" /dev/null"
             let sshCmd = Self.buildSSHCommandUnquoted(destination: destination, identityFile: identityFile, sshOptions: sshOptions, extraFlags: ["-tt"])
             // The remote command is single-quoted so no local shell expansion occurs.
             // Single quotes within the remote script are escaped as '\'' (end quote,

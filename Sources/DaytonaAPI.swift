@@ -187,6 +187,7 @@ struct DaytonaSandboxCreateRequest: Encodable {
     let cpu: Int?
     let memory: Int?
     let disk: Int?
+    let image: String?
     let env: [String: String]?
     let labels: [String: String]?
     let snapshot: String?
@@ -195,7 +196,7 @@ struct DaytonaSandboxCreateRequest: Encodable {
     let autostopTimeoutMinutes: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case cpu, memory, disk, env, labels, snapshot, language, region
+        case cpu, memory, disk, image, env, labels, snapshot, language, region
         case autostopTimeoutMinutes
     }
 
@@ -203,12 +204,13 @@ struct DaytonaSandboxCreateRequest: Encodable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(env, forKey: .env)
         try container.encodeIfPresent(labels, forKey: .labels)
+        try container.encodeIfPresent(image, forKey: .image)
         try container.encodeIfPresent(snapshot, forKey: .snapshot)
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(region, forKey: .region)
         try container.encodeIfPresent(autostopTimeoutMinutes, forKey: .autostopTimeoutMinutes)
-        // Only include resource fields when NOT using a snapshot
-        if snapshot == nil {
+        // Only include resource fields when NOT using a snapshot or image
+        if snapshot == nil && image == nil {
             try container.encodeIfPresent(cpu, forKey: .cpu)
             try container.encodeIfPresent(memory, forKey: .memory)
             try container.encodeIfPresent(disk, forKey: .disk)
