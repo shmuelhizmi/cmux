@@ -141,7 +141,6 @@ extension DaytonaCloudConfiguration {
 
         case "import_pr":
             let num = prNumber ?? 0
-            let slug = repoSlug ?? ""
             return """
             set -e
             \(installGit)
@@ -149,16 +148,9 @@ extension DaytonaCloudConfiguration {
             echo "Cloning \(shellEscape(repoURL))..."
             git clone \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo
-            if command -v gh >/dev/null 2>&1; then
-                gh pr checkout \(num)\(slug.isEmpty ? "" : " --repo \(shellEscape(slug))")
-            else
-                echo "Installing gh CLI..."
-                (type -p wget >/dev/null || (apt-get update -qq && apt-get install -y -qq wget >/dev/null 2>&1)) && \
-                wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null && \
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list >/dev/null && \
-                apt-get update -qq && apt-get install -y -qq gh >/dev/null 2>&1
-                gh pr checkout \(num)\(slug.isEmpty ? "" : " --repo \(shellEscape(slug))")
-            fi
+            echo "Checking out PR #\(num)..."
+            git fetch origin pull/\(num)/head:pr-\(num)
+            git checkout pr-\(num)
             echo "Ready on PR #\(num)"
             """
 
