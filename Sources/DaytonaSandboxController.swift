@@ -130,7 +130,12 @@ final class DaytonaSandboxController {
             // Step 4: Hand off to existing remote session infrastructure
             let remoteConfig = buildRemoteConfiguration(sshToken: sshAccess.token)
 #if DEBUG
-            dlog("daytona.provision handoff dest=\(remoteConfig.destination) identity=\(remoteConfig.identityFile ?? "nil") options=\(remoteConfig.sshOptions)")
+            dlog("daytona.provision handoff dest=\(remoteConfig.destination) identity=\(remoteConfig.identityFile ?? "nil") options=\(remoteConfig.sshOptions) startupCmd=\(remoteConfig.terminalStartupCommand ?? "nil") uploadViaSSHPipe=\(remoteConfig.uploadViaSSHPipe)")
+            // Log the actual script content so we can verify the SSH command is correct
+            if let scriptPath = remoteConfig.terminalStartupCommand,
+               let scriptContent = try? String(contentsOfFile: scriptPath, encoding: .utf8) {
+                dlog("daytona.provision startupScript.content=\(scriptContent.replacingOccurrences(of: "\n", with: "\\n"))")
+            }
 #endif
             workspace.configureRemoteConnection(remoteConfig, autoConnect: true)
             workspace.cloudMachineState = .ready
@@ -159,7 +164,12 @@ final class DaytonaSandboxController {
             cpu: spec.cpu,
             memory: spec.memory,
             disk: spec.disk,
-            env: ["CMUX_CLOUD": "1"],
+            env: [
+                "CMUX_CLOUD": "1",
+                "SHELL": "/bin/bash",
+                "USER": "daytona",
+                "TERM": "xterm-256color",
+            ],
             labels: ["cmux": "true"],
             snapshot: spec.snapshot,
             language: spec.language,
@@ -196,28 +206,58 @@ final class DaytonaSandboxController {
     // MARK: - Remote Configuration Handoff
 
     private func buildRemoteConfiguration(sshToken: String) -> WorkspaceRemoteConfiguration {
-        let startupCommand: String?
+        let destination = "\(sshToken)@ssh.app.daytona.io"
+        let sshOptions = [
+            "StrictHostKeyChecking=no",
+            "UserKnownHostsFile=/dev/null",
+            "LogLevel=ERROR",
+            // Daytona SSH proxy authenticates via the token in the username.
+            // Override BatchMode=yes (set by the remote session controller) so that
+            // keyboard-interactive auth works — Daytona's proxy requires it.
+            "BatchMode=no",
+            "PasswordAuthentication=no",
+            "PreferredAuthentications=publickey,keyboard-interactive,none",
+        ]
+        let identityFile = Self.defaultSSHKeyPath()
+
+        // Build the SSH command that terminals will use to connect to the sandbox.
+        // terminalStartupCommand is used for ALL terminals in this workspace (initial + new tabs/splits).
+        // It must be an SSH command — not a local script.
+        // IMPORTANT: -tt must come BEFORE the destination. SSH treats everything after
+        // the destination as the remote command, so -tt after destination would be sent
+        // to the remote shell as a literal command (causing immediate exit).
+
+        // Daytona's SSH proxy does NOT allocate a PTY even with ssh -tt.
+        // Use `script -qc "..." /dev/null` on the remote to force PTY allocation
+        // so that bash gets an interactive terminal with prompt, colors, etc.
+        let startupCommand: String
         if let script = configuration.gitSetupScript, !script.isEmpty {
-            startupCommand = "(\(script)) && cd /home/daytona/repo 2>/dev/null; exec $SHELL -l"
+            // SSH into sandbox, run the git setup, then start an interactive login shell.
+            // For the initial terminal, the setup runs (clone etc.).
+            // For subsequent terminals, the clone is already done so the cd succeeds and the shell starts.
+            let remoteScript = "cd /home/daytona/repo 2>/dev/null || { " + script + " && cd /home/daytona/repo 2>/dev/null; }; exec script -qc \"/bin/bash --login\" /dev/null"
+            let sshCmd = Self.buildSSHCommandUnquoted(destination: destination, identityFile: identityFile, sshOptions: sshOptions, extraFlags: ["-tt"])
+            // The remote command is single-quoted so no local shell expansion occurs.
+            // Single quotes within the remote script are escaped as '\'' (end quote,
+            // escaped literal quote, restart quote).
+            let escapedRemoteScript = remoteScript.replacingOccurrences(of: "'", with: "'\\''")
+            startupCommand = Self.writeStartupScript(
+                "exec " + sshCmd + " '\(escapedRemoteScript)'"
+            )
         } else {
-            startupCommand = nil
+            let remoteScript = "exec script -qc \"/bin/bash --login\" /dev/null"
+            let sshCmd = Self.buildSSHCommandUnquoted(destination: destination, identityFile: identityFile, sshOptions: sshOptions, extraFlags: ["-tt"])
+            let escapedRemoteScript = remoteScript.replacingOccurrences(of: "'", with: "'\\''")
+            startupCommand = Self.writeStartupScript(
+                "exec " + sshCmd + " '\(escapedRemoteScript)'"
+            )
         }
 
         return WorkspaceRemoteConfiguration(
-            destination: "\(sshToken)@ssh.app.daytona.io",
+            destination: destination,
             port: nil,
-            identityFile: Self.defaultSSHKeyPath(),
-            sshOptions: [
-                "StrictHostKeyChecking=no",
-                "UserKnownHostsFile=/dev/null",
-                "LogLevel=ERROR",
-                // Daytona SSH proxy authenticates via the token in the username.
-                // Override BatchMode=yes (set by the remote session controller) so that
-                // keyboard-interactive auth works — Daytona's proxy requires it.
-                "BatchMode=no",
-                "PasswordAuthentication=no",
-                "PreferredAuthentications=publickey,keyboard-interactive,none",
-            ],
+            identityFile: identityFile,
+            sshOptions: sshOptions,
             localProxyPort: nil,
             relayPort: nil,
             relayID: nil,
@@ -226,6 +266,50 @@ final class DaytonaSandboxController {
             terminalStartupCommand: startupCommand,
             uploadViaSSHPipe: true
         )
+    }
+
+    /// Build an SSH command for use inside a startup script where the ssh line is the
+    /// top-level command (not nested inside another quoting context).
+    /// Options that contain no special shell characters are left unquoted;
+    /// the identity file path is single-quoted since it may contain spaces.
+    /// `extraFlags` (e.g. ["-tt"]) are placed before -i/-o options, ensuring they
+    /// appear before the destination (SSH treats post-destination args as the remote command).
+    private static func buildSSHCommandUnquoted(
+        destination: String,
+        identityFile: String?,
+        sshOptions: [String],
+        extraFlags: [String] = []
+    ) -> String {
+        var args = ["ssh"]
+        args += extraFlags
+        if let identityFile {
+            args += ["-i", shellQuote(identityFile)]
+        }
+        for option in sshOptions {
+            args += ["-o", option]
+        }
+        args.append(shellQuote(destination))
+        return args.joined(separator: " ")
+    }
+
+    /// Write a startup script to a temp file and return the quoted path.
+    private static func writeStartupScript(_ body: String) -> String {
+        let tempDir = FileManager.default.temporaryDirectory
+        let scriptURL = tempDir.appendingPathComponent(
+            "cmux-daytona-startup-\(UUID().uuidString.lowercased()).sh"
+        )
+        let script = "#!/bin/sh\n\(body)\n"
+        do {
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+        } catch {
+            return body
+        }
+        return scriptURL.path
+    }
+
+    private static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
     // MARK: - Helpers
 

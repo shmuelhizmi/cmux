@@ -7051,13 +7051,29 @@ final class Workspace: Identifiable, ObservableObject {
 
     private func seedInitialRemoteTerminalSessionIfNeeded(configuration: WorkspaceRemoteConfiguration) {
         guard configuration.terminalStartupCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+#if DEBUG
+            dlog("remote.seed.skip reason=noStartupCommand rawCmd=\(configuration.terminalStartupCommand?.prefix(60) ?? "nil")")
+#endif
             return
         }
-        guard activeRemoteTerminalSurfaceIds.isEmpty else { return }
+        guard activeRemoteTerminalSurfaceIds.isEmpty else {
+#if DEBUG
+            dlog("remote.seed.skip reason=alreadyHasActiveSessions count=\(activeRemoteTerminalSurfaceIds.count)")
+#endif
+            return
+        }
         let terminalIds = panels.compactMap { panelId, panel in
             panel is TerminalPanel ? panelId : nil
         }
-        guard terminalIds.count == 1, let initialPanelId = terminalIds.first else { return }
+        guard terminalIds.count == 1, let initialPanelId = terminalIds.first else {
+#if DEBUG
+            dlog("remote.seed.skip reason=terminalCountNot1 count=\(terminalIds.count)")
+#endif
+            return
+        }
+#if DEBUG
+        dlog("remote.seed.track panelId=\(initialPanelId.uuidString.prefix(5)) startupCmd=\(configuration.terminalStartupCommand?.prefix(80) ?? "nil")")
+#endif
         trackRemoteTerminalSurface(initialPanelId)
     }
 
@@ -7551,6 +7567,9 @@ final class Workspace: Identifiable, ObservableObject {
 #endif
 
         // Create the new terminal panel.
+#if DEBUG
+        dlog("split.create panelId=\(panelId.uuidString.prefix(5)) isRemote=\(isRemoteWorkspace) hasStartupCmd=\(remoteTerminalStartupCommand != nil) cmd=\(remoteTerminalStartupCommand?.prefix(80) ?? "nil") cwd=\(splitWorkingDirectory ?? "nil")")
+#endif
         let newPanel = TerminalPanel(
             workspaceId: id,
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
@@ -7639,6 +7658,9 @@ final class Workspace: Identifiable, ObservableObject {
         let inheritedConfig = inheritedTerminalConfig(inPane: paneId)
         let remoteTerminalStartupCommand = remoteTerminalStartupCommand()
 
+#if DEBUG
+        dlog("tab.create.inPane paneId=\(paneId) isRemote=\(isRemoteWorkspace) hasStartupCmd=\(remoteTerminalStartupCommand != nil) cmd=\(remoteTerminalStartupCommand?.prefix(80) ?? "nil") cwd=\(workingDirectory ?? "nil")")
+#endif
         // Create new terminal panel
         let newPanel = TerminalPanel(
             workspaceId: id,
@@ -7699,8 +7721,14 @@ final class Workspace: Identifiable, ObservableObject {
         guard let command = remoteConfiguration?.terminalStartupCommand?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else {
+#if DEBUG
+            dlog("remote.startupCommand.resolve result=nil hasConfig=\(remoteConfiguration != nil) rawCommand=\(remoteConfiguration?.terminalStartupCommand?.prefix(80) ?? "nil")")
+#endif
             return nil
         }
+#if DEBUG
+        dlog("remote.startupCommand.resolve result=\(command.prefix(120))")
+#endif
         return command
     }
 

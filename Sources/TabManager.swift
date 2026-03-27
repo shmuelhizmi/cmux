@@ -2603,10 +2603,17 @@ class TabManager: ObservableObject {
             tab.panels.count <= 1 && tab.shouldDemoteWorkspaceAfterChildExit(surfaceId: surfaceId)
 
 #if DEBUG
+        let panelType = tab.panels[surfaceId].map { String(describing: type(of: $0)) } ?? "nil"
+        let remoteCmd = tab.remoteConfiguration?.terminalStartupCommand?.prefix(60) ?? "nil"
+        let remoteState = tab.remoteConnectionState.rawValue
+        let remoteDaemon = tab.remoteDaemonStatus.state.rawValue
+        let activeRemoteSessions = tab.activeRemoteTerminalSessionCount
         dlog(
             "surface.close.childExited tab=\(tabId.uuidString.prefix(5)) " +
             "surface=\(surfaceId.uuidString.prefix(5)) panels=\(tab.panels.count) workspaces=\(tabs.count) " +
-            "remoteWorkspace=\(tab.isRemoteWorkspace ? 1 : 0) keepRemote=\(keepsRemoteWorkspaceOpen ? 1 : 0)"
+            "remoteWorkspace=\(tab.isRemoteWorkspace ? 1 : 0) keepRemote=\(keepsRemoteWorkspaceOpen ? 1 : 0) " +
+            "panelType=\(panelType) remoteState=\(remoteState) daemonState=\(remoteDaemon) " +
+            "activeSessions=\(activeRemoteSessions) remoteCmd=\(remoteCmd)"
         )
 #endif
 
