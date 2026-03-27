@@ -205,6 +205,23 @@ final class DaytonaSandboxController {
             dlog("daytona.provision settingReady wsId=\(workspace.id) currentState=\(workspace.cloudMachineState.rawValue) hasCloudConfig=\(workspace.cloudConfiguration != nil)")
 #endif
             workspace.cloudMachineState = .ready
+
+            // Create the first remote terminal now that provisioning is complete.
+            // The workspace was created with skipInitialTerminal=true, so no local
+            // terminal exists yet.
+            if workspace.panels.isEmpty {
+                if let paneId = workspace.bonsplitController.focusedPaneId
+                    ?? workspace.bonsplitController.allPaneIds.first {
+                    workspace.newTerminalSurface(inPane: paneId)
+                } else {
+                    // No pane exists — create via the focused-pane helper which
+                    // falls back to creating a pane if needed.
+                    workspace.newTerminalSurfaceInFocusedPane()
+                }
+#if DEBUG
+                dlog("daytona.provision createdRemoteTerminal panelCount=\(workspace.panels.count)")
+#endif
+            }
 #if DEBUG
             dlog("daytona.provision complete state=\(workspace.cloudMachineState.rawValue)")
 #endif
@@ -275,6 +292,12 @@ final class DaytonaSandboxController {
             region: spec.region,
             autostopTimeoutMinutes: configuration.autoStopInterval
         )
+#if DEBUG
+        if let jsonData = try? JSONEncoder().encode(request),
+           let jsonStr = String(data: jsonData, encoding: .utf8) {
+            dlog("daytona.provision createRequest.json=\(jsonStr)")
+        }
+#endif
         return try await api.createSandbox(request: request)
     }
 
@@ -403,11 +426,21 @@ final class DaytonaSandboxController {
         dlog("daytona.ssh.exec.done exitCode=\(result.exitCode) stdoutLines=\(result.stdoutLines.count) stderr=\(result.stderr.prefix(200)) lastStdout=\(result.stdoutLines.last?.prefix(100) ?? "nil")")
 #endif
         if result.exitCode != 0 {
-            // Include both stderr and last stdout lines for context
-            let output = result.stderr.isEmpty
-                ? result.stdoutLines.suffix(5).joined(separator: "\n")
-                : result.stderr
-            throw DaytonaControllerError.setupCommandFailed(exitCode: result.exitCode, output: output)
+            // SSH exit 255 means the SSH connection closed, but the remote commands
+            // may have completed successfully. Check if stdout shows the expected
+            // "Ready" marker from our git setup scripts.
+            let lastLine = result.stdoutLines.last ?? ""
+            let looksSuccessful = lastLine.hasPrefix("Ready")
+            if result.exitCode == 255 && looksSuccessful {
+#if DEBUG
+                dlog("daytona.ssh.exec.ignoring255 lastLine=\(lastLine)")
+#endif
+            } else {
+                let output = result.stderr.isEmpty
+                    ? result.stdoutLines.suffix(5).joined(separator: "\n")
+                    : result.stderr
+                throw DaytonaControllerError.setupCommandFailed(exitCode: result.exitCode, output: output)
+            }
         }
     }
 

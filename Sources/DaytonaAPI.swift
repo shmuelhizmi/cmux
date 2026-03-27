@@ -209,7 +209,7 @@ struct DaytonaSandboxCreateRequest: Encodable {
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(region, forKey: .region)
         try container.encodeIfPresent(autostopTimeoutMinutes, forKey: .autostopTimeoutMinutes)
-        // Only include resource fields when NOT using a snapshot or image
+        // Snapshots and images carry/define their own resources — omit cpu/memory/disk.
         if snapshot == nil && image == nil {
             try container.encodeIfPresent(cpu, forKey: .cpu)
             try container.encodeIfPresent(memory, forKey: .memory)

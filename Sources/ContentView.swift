@@ -6973,7 +6973,7 @@ struct ContentView: View {
             return
         }
 
-        let workspace = tabManager.addWorkspace(select: true)
+        let workspace = tabManager.addWorkspace(select: true, skipInitialTerminal: true)
         if let label, !label.isEmpty {
             workspace.setCustomTitle(label)
         }

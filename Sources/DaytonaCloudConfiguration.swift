@@ -18,6 +18,39 @@ struct DaytonaCloudSandboxSpec: Codable, Equatable, Sendable {
         region: nil,
         language: nil
     )
+
+    /// Build a spec from the user's saved settings, falling back to defaults.
+    static func fromSettings(defaults: UserDefaults = .standard) -> DaytonaCloudSandboxSpec {
+        let cpu = defaults.object(forKey: CloudMachineSettings.cpuKey) as? Int ?? CloudMachineSettings.defaultCPU
+        let memory = defaults.object(forKey: CloudMachineSettings.memoryKey) as? Int ?? CloudMachineSettings.defaultMemory
+        let disk = defaults.object(forKey: CloudMachineSettings.diskKey) as? Int ?? CloudMachineSettings.defaultDisk
+        let snapshot = defaults.string(forKey: CloudMachineSettings.snapshotKey)
+        return DaytonaCloudSandboxSpec(
+            cpu: cpu,
+            memory: memory,
+            disk: disk,
+            snapshot: snapshot ?? Self.default.snapshot,
+            region: nil,
+            language: nil
+        )
+    }
+}
+
+// MARK: - Machine Settings
+
+enum CloudMachineSettings {
+    static let cpuKey = "cloud.machine.cpu"
+    static let memoryKey = "cloud.machine.memory"
+    static let diskKey = "cloud.machine.disk"
+    static let snapshotKey = "cloud.machine.snapshot"
+
+    static let defaultCPU = 2
+    static let defaultMemory = 4
+    static let defaultDisk = 20
+
+    static let cpuSteps = [1, 2, 4, 8]
+    static let memorySteps = [1, 2, 4, 8, 16]
+    static let diskSteps = [10, 20, 50, 100]
 }
 
 // MARK: - Cloud Configuration

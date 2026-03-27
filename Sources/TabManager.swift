@@ -1152,7 +1152,8 @@ class TabManager: ObservableObject {
         portOrdinal: Int,
         configTemplate: ghostty_surface_config_s?,
         initialTerminalCommand: String?,
-        initialTerminalEnvironment: [String: String]
+        initialTerminalEnvironment: [String: String],
+        skipInitialTerminal: Bool = false
     ) -> Workspace {
         Workspace(
             title: title,
@@ -1160,7 +1161,8 @@ class TabManager: ObservableObject {
             portOrdinal: portOrdinal,
             configTemplate: configTemplate,
             initialTerminalCommand: initialTerminalCommand,
-            initialTerminalEnvironment: initialTerminalEnvironment
+            initialTerminalEnvironment: initialTerminalEnvironment,
+            skipInitialTerminal: skipInitialTerminal
         )
     }
 
@@ -1200,7 +1202,8 @@ class TabManager: ObservableObject {
         select: Bool = true,
         eagerLoadTerminal: Bool = false,
         placementOverride: NewWorkspacePlacement? = nil,
-        autoWelcomeIfNeeded: Bool = true
+        autoWelcomeIfNeeded: Bool = true,
+        skipInitialTerminal: Bool = false
     ) -> Workspace {
         // Snapshot current published state once so workspace creation doesn't repeatedly
         // bounce through Combine-backed accessors while we're preparing the new workspace.
@@ -1226,7 +1229,8 @@ class TabManager: ObservableObject {
             portOrdinal: ordinal,
             configTemplate: inheritedConfig,
             initialTerminalCommand: initialTerminalCommand,
-            initialTerminalEnvironment: initialTerminalEnvironment
+            initialTerminalEnvironment: initialTerminalEnvironment,
+            skipInitialTerminal: skipInitialTerminal
         )
         newWorkspace.owningTabManager = self
         wireClosedBrowserTracking(for: newWorkspace)

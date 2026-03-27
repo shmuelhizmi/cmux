@@ -83,6 +83,11 @@ struct NewCloudWorkspaceSheet: View {
     @State private var apiKeyInput: String = ""
     @State private var detectedDevContainer: DevContainerConfig?
     @State private var githubToken: String?
+    @State private var showMachineSettings: Bool = false
+
+    @AppStorage(CloudMachineSettings.cpuKey) private var cpuSetting = CloudMachineSettings.defaultCPU
+    @AppStorage(CloudMachineSettings.memoryKey) private var memorySetting = CloudMachineSettings.defaultMemory
+    @AppStorage(CloudMachineSettings.diskKey) private var diskSetting = CloudMachineSettings.defaultDisk
 
     private var filteredItems: [CloudWorkspaceItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -187,6 +192,9 @@ struct NewCloudWorkspaceSheet: View {
                 }
 
                 Divider()
+
+                // Machine settings
+                machineSettingsSection
 
                 // Footer
                 HStack {
@@ -376,6 +384,92 @@ struct NewCloudWorkspaceSheet: View {
         }
     }
 
+    // MARK: - Machine Settings
+
+    private var machineSettingsSection: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showMachineSettings.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showMachineSettings ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 12)
+                    Text(String(localized: "cloud.machine.title", defaultValue: "Machine"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(machineSettingSummary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showMachineSettings {
+                VStack(spacing: 10) {
+                    stepSlider(
+                        label: String(localized: "cloud.machine.cpu", defaultValue: "CPU"),
+                        value: $cpuSetting,
+                        steps: CloudMachineSettings.cpuSteps,
+                        unit: String(localized: "cloud.machine.cores", defaultValue: "cores")
+                    )
+                    stepSlider(
+                        label: String(localized: "cloud.machine.memory", defaultValue: "Memory"),
+                        value: $memorySetting,
+                        steps: CloudMachineSettings.memorySteps,
+                        unit: "GB"
+                    )
+                    stepSlider(
+                        label: String(localized: "cloud.machine.disk", defaultValue: "Disk"),
+                        value: $diskSetting,
+                        steps: CloudMachineSettings.diskSteps,
+                        unit: "GB"
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var machineSettingSummary: String {
+        "\(cpuSetting) CPU · \(memorySetting) GB · \(diskSetting) GB"
+    }
+
+    private func stepSlider(label: String, value: Binding<Int>, steps: [Int], unit: String) -> some View {
+        let idx = steps.firstIndex(of: value.wrappedValue) ?? 0
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .leading)
+            Slider(
+                value: Binding<Double>(
+                    get: { Double(idx) },
+                    set: { newIdx in
+                        let clamped = max(0, min(steps.count - 1, Int(newIdx.rounded())))
+                        value.wrappedValue = steps[clamped]
+                    }
+                ),
+                in: 0...Double(steps.count - 1),
+                step: 1
+            )
+            Text("\(value.wrappedValue) \(unit)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary)
+                .frame(width: 65, alignment: .trailing)
+        }
+    }
+
     // MARK: - Create Branch Form
 
     private var createBranchForm: some View {
@@ -514,7 +608,7 @@ struct NewCloudWorkspaceSheet: View {
 
     private func buildConfig(gitSetupScript: String) -> DaytonaCloudConfiguration {
         DaytonaCloudConfiguration(
-            sandboxSpec: .default,
+            sandboxSpec: .fromSettings(),
             gitSetupScript: gitSetupScript,
             autoStopInterval: 1440,
             devContainer: detectedDevContainer
