@@ -82,6 +82,7 @@ struct NewCloudWorkspaceSheet: View {
     @State private var needsApiKey: Bool = DaytonaAuthTokenStore.token() == nil
     @State private var apiKeyInput: String = ""
     @State private var detectedDevContainer: DevContainerConfig?
+    @State private var githubToken: String?
 
     private var filteredItems: [CloudWorkspaceItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -455,7 +456,8 @@ struct NewCloudWorkspaceSheet: View {
             return
         }
         let script = DaytonaCloudConfiguration.buildGitSetupScript(
-            mode: "import_branch", repoURL: repoURL, branchName: name
+            mode: "import_branch", repoURL: repoURL, branchName: name,
+            githubToken: githubToken
         )
         let config = buildConfig(gitSetupScript: script)
 #if DEBUG
@@ -475,7 +477,8 @@ struct NewCloudWorkspaceSheet: View {
             return
         }
         let script = DaytonaCloudConfiguration.buildGitSetupScript(
-            mode: "import_pr", repoURL: repoURL, prNumber: number, repoSlug: repoSlug
+            mode: "import_pr", repoURL: repoURL, prNumber: number, repoSlug: repoSlug,
+            githubToken: githubToken
         )
         let label = "#\(number) \(title)"
         let config = buildConfig(gitSetupScript: script)
@@ -493,7 +496,8 @@ struct NewCloudWorkspaceSheet: View {
         let script = DaytonaCloudConfiguration.buildGitSetupScript(
             mode: "create_branch", repoURL: repoURL,
             baseBranch: base.isEmpty ? "main" : base,
-            newBranchName: name
+            newBranchName: name,
+            githubToken: githubToken
         )
         let config = buildConfig(gitSetupScript: script)
         onSubmit(config, name)
@@ -547,11 +551,15 @@ struct NewCloudWorkspaceSheet: View {
             // Detect devcontainer config
             let devContainer = DevContainerConfig.detect(inDirectory: dir)
 
+            // Get GitHub token for private repo auth
+            let ghToken = Self.fetchGitHubToken()
+
             DispatchQueue.main.async {
                 detectedRepoSlug = slug
                 detectedRepoURL = repoURL
                 detectedHead = head
                 detectedDevContainer = devContainer
+                githubToken = ghToken
 
                 var allItems: [CloudWorkspaceItem] = []
                 allItems.append(contentsOf: prs)
@@ -632,6 +640,22 @@ struct NewCloudWorkspaceSheet: View {
 
     static func resolvedGHPath() -> String? {
         GitHubService.resolvedCommandPath(executable: "gh")
+    }
+
+    /// Fetches a GitHub auth token via `gh auth token` for use in remote git operations.
+    private static func fetchGitHubToken() -> String? {
+        guard let ghPath = resolvedGHPath() else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ghPath)
+        process.arguments = ["auth", "token"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run(); process.waitUntilExit() } catch { return nil }
+        guard process.terminationStatus == 0 else { return nil }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return output?.isEmpty == false ? output : nil
     }
 }
 

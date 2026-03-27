@@ -77,6 +77,7 @@ enum DaytonaCloudMachineState: String, Codable, Sendable {
 
 extension DaytonaCloudConfiguration {
     /// Builds a shell script that clones a repo and checks out the right branch/PR on the sandbox.
+    /// When `githubToken` is provided, git credential storage is configured so clone, push, pull all work.
     static func buildGitSetupScript(
         mode: String,
         repoURL: String,
@@ -84,7 +85,8 @@ extension DaytonaCloudConfiguration {
         baseBranch: String? = nil,
         newBranchName: String? = nil,
         prNumber: Int? = nil,
-        repoSlug: String? = nil
+        repoSlug: String? = nil,
+        githubToken: String? = nil
     ) -> String {
         let installGit = """
         if ! command -v git >/dev/null 2>&1; then
@@ -97,6 +99,18 @@ extension DaytonaCloudConfiguration {
         fi
         """
 
+        // Set up git credential storage so clone/push/pull/fetch all work with private repos.
+        let setupCredentials: String
+        if let token = githubToken, !token.isEmpty {
+            setupCredentials = """
+            git config --global credential.helper store
+            printf \(shellEscape("https://x-access-token:\(token)@github.com\\n")) > ~/.git-credentials
+            chmod 600 ~/.git-credentials
+            """
+        } else {
+            setupCredentials = ""
+        }
+
         switch mode {
         case "create_branch":
             let base = baseBranch ?? "main"
@@ -104,6 +118,7 @@ extension DaytonaCloudConfiguration {
             return """
             set -e
             \(installGit)
+            \(setupCredentials)
             echo "Cloning \(shellEscape(repoURL))..."
             git clone --branch \(shellEscape(base)) \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo
@@ -116,6 +131,7 @@ extension DaytonaCloudConfiguration {
             return """
             set -e
             \(installGit)
+            \(setupCredentials)
             echo "Cloning \(shellEscape(repoURL)) (branch: \(shellEscape(branch)))..."
             git clone --branch \(shellEscape(branch)) \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo
@@ -128,6 +144,7 @@ extension DaytonaCloudConfiguration {
             return """
             set -e
             \(installGit)
+            \(setupCredentials)
             echo "Cloning \(shellEscape(repoURL))..."
             git clone \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo

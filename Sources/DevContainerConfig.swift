@@ -65,6 +65,7 @@ extension DevContainerCommand: Codable {
 
 struct DevContainerBuild: Codable, Equatable, Sendable {
     var dockerfile: String?
+    var context: String?
 }
 
 // MARK: - Detection
@@ -87,13 +88,47 @@ extension DevContainerConfig {
             // devcontainer.json allows JSON5-style comments; strip them before parsing
             guard let cleaned = stripJSONComments(data) else { continue }
             do {
-                return try JSONDecoder().decode(DevContainerConfig.self, from: cleaned)
+                var config = try JSONDecoder().decode(DevContainerConfig.self, from: cleaned)
+
+                // When there's a Dockerfile but no image, extract the FROM image
+                // so Daytona can at least use the base image.
+                if config.image == nil, let dockerfile = config.build?.dockerfile {
+                    let devcontainerDir = (path as NSString).deletingLastPathComponent
+                    let context = config.build?.context ?? "."
+                    let contextDir = (devcontainerDir as NSString).appendingPathComponent(context)
+                    let dockerfilePath = (contextDir as NSString).appendingPathComponent(dockerfile)
+                    if let fromImage = extractDockerfileFromImage(atPath: dockerfilePath) {
+#if DEBUG
+                        dlog("devcontainer.dockerfile.from path=\(dockerfilePath) image=\(fromImage)")
+#endif
+                        config.image = fromImage
+                    }
+                }
+
+                return config
             } catch {
 #if DEBUG
                 dlog("devcontainer.parse error path=\(path) err=\(error.localizedDescription)")
 #endif
                 continue
             }
+        }
+        return nil
+    }
+
+    /// Extracts the base image from a Dockerfile's first `FROM` instruction.
+    private static func extractDockerfileFromImage(atPath path: String) -> String? {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.uppercased().hasPrefix("FROM ") else { continue }
+            // FROM image:tag [AS name]
+            let parts = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                .components(separatedBy: .whitespaces)
+            guard let image = parts.first, !image.isEmpty else { continue }
+            // Skip ARG-based images like FROM ${BASE_IMAGE}
+            if image.contains("$") { return nil }
+            return image
         }
         return nil
     }

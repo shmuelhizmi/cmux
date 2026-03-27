@@ -148,11 +148,17 @@ final class DaytonaSandboxController {
             dlog("daytona.provision cancelled")
 #endif
         } catch {
+            let detail: String
+            if let apiErr = error as? DaytonaAPIError {
+                detail = apiErr.errorDescription ?? String(describing: error)
+            } else {
+                detail = error.localizedDescription
+            }
 #if DEBUG
-            dlog("daytona.provision error: \(error.localizedDescription)")
+            dlog("daytona.provision error: \(detail)")
 #endif
             workspace.cloudMachineState = .error
-            workspace.cloudMachineDetail = error.localizedDescription
+            workspace.cloudMachineDetail = detail
         }
     }
 
@@ -175,22 +181,28 @@ final class DaytonaSandboxController {
             env.merge(remoteEnv) { _, new in new }
         }
 
-        // Use devcontainer image when available (and no Dockerfile build required)
-        let useImage = dc?.image != nil && dc?.build?.dockerfile == nil
+        // Use devcontainer image when available.
+        // When the devcontainer has a Dockerfile, the detect() method extracts the FROM base image.
+        let useImage = dc?.image != nil
 #if DEBUG
         if let dc {
             dlog("daytona.provision devcontainer image=\(dc.image ?? "nil") build.dockerfile=\(dc.build?.dockerfile ?? "nil") useImage=\(useImage)")
         }
 #endif
 
+        let effectiveImage = useImage ? dc?.image : nil
+        let effectiveSnapshot = useImage ? nil : spec.snapshot
+#if DEBUG
+        dlog("daytona.provision createRequest image=\(effectiveImage ?? "nil") snapshot=\(effectiveSnapshot ?? "nil") envCount=\(env.count) autoStop=\(configuration.autoStopInterval ?? -1)")
+#endif
         let request = DaytonaSandboxCreateRequest(
             cpu: spec.cpu,
             memory: spec.memory,
             disk: spec.disk,
-            image: useImage ? dc?.image : nil,
+            image: effectiveImage,
             env: env,
             labels: ["cmux": "true"],
-            snapshot: useImage ? nil : spec.snapshot,
+            snapshot: effectiveSnapshot,
             language: spec.language,
             region: spec.region,
             autostopTimeoutMinutes: configuration.autoStopInterval

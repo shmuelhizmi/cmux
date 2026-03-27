@@ -1270,10 +1270,19 @@ class GhosttyApp {
                             surfaceId: callbackSurfaceId
                         )
                     } else {
-                        manager.closeRuntimeSurface(
-                            tabId: callbackTabId,
-                            surfaceId: callbackSurfaceId
-                        )
+                        // For cloud workspaces, do NOT close the surface automatically
+                        // when the child process exits — keep the terminal open so the
+                        // user can see SSH error output.
+                        if workspace.cloudConfiguration != nil {
+#if DEBUG
+                            dlog("surface.close_surface_cb SKIP for cloud workspace tab=\(callbackTabId.uuidString.prefix(5)) surface=\(callbackSurfaceId.uuidString.prefix(5))")
+#endif
+                        } else {
+                            manager.closeRuntimeSurface(
+                                tabId: callbackTabId,
+                                surfaceId: callbackSurfaceId
+                            )
+                        }
                     }
                 }
             }
@@ -2302,6 +2311,7 @@ class GhosttyApp {
 #endif
             // Keep host-close async to avoid re-entrant close/deinit while Ghostty is still
             // dispatching this action callback.
+            // For cloud workspaces, skip auto-close so the user can see SSH errors.
             DispatchQueue.main.async {
                 guard let app = AppDelegate.shared else { return }
                 if let callbackTabId,
@@ -2309,6 +2319,14 @@ class GhosttyApp {
                    let manager = app.tabManagerFor(tabId: callbackTabId) ?? app.tabManager,
                    let workspace = manager.tabs.first(where: { $0.id == callbackTabId }),
                    workspace.panels[callbackSurfaceId] != nil {
+                    // For cloud workspaces, do NOT auto-close on child exit — let the
+                    // terminal show the error output so the user can debug SSH failures.
+                    if workspace.cloudConfiguration != nil {
+#if DEBUG
+                        dlog("surface.close.childExited SKIP auto-close for cloud workspace tab=\(callbackTabId.uuidString.prefix(5))")
+#endif
+                        return
+                    }
                     manager.closePanelAfterChildExited(tabId: callbackTabId, surfaceId: callbackSurfaceId)
                 }
             }
