@@ -4028,6 +4028,38 @@ class TerminalController {
         let workspaceLabel = v2RawString(params, "workspace_label")
         let autoStopInterval = v2StrictInt(params, "auto_stop_interval")
 
+        // Doppler secrets integration
+        let dopplerToken = v2RawString(params, "doppler_token")
+        let dopplerProject = v2RawString(params, "doppler_project")
+        let dopplerConfigName = v2RawString(params, "doppler_config")
+        var dopplerCfg: DopplerIntegrationConfig?
+        if let dopplerToken, !dopplerToken.isEmpty {
+            dopplerCfg = DopplerIntegrationConfig(
+                serviceToken: dopplerToken,
+                project: dopplerProject,
+                config: dopplerConfigName
+            )
+        } else if let dopplerProject, !dopplerProject.isEmpty,
+                  let dopplerConfigName, !dopplerConfigName.isEmpty {
+            // Create a service token from the local doppler CLI
+            let tokenName = "cmux-\(Int(Date().timeIntervalSince1970))"
+            if let createdToken = DopplerService.createServiceToken(
+                project: dopplerProject, config: dopplerConfigName, name: tokenName
+            ) {
+                dopplerCfg = DopplerIntegrationConfig(
+                    serviceToken: createdToken,
+                    project: dopplerProject,
+                    config: dopplerConfigName
+                )
+            } else {
+                return .err(
+                    code: "doppler_error",
+                    message: "Failed to create Doppler service token. Is the doppler CLI installed and authenticated?",
+                    data: nil
+                )
+            }
+        }
+
         let spec = DaytonaCloudSandboxSpec(
             cpu: cpu,
             memory: memory,
@@ -4041,7 +4073,8 @@ class TerminalController {
             gitSetupScript: gitSetupScript,
             workspaceLabel: workspaceLabel,
             resolvedSandboxID: sandboxID,
-            autoStopInterval: autoStopInterval
+            autoStopInterval: autoStopInterval,
+            doppler: dopplerCfg
         )
 
         var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: nil)

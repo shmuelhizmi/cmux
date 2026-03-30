@@ -18,6 +18,50 @@ struct DaytonaCloudSandboxSpec: Codable, Equatable, Sendable {
         region: nil,
         language: nil
     )
+
+    /// Build a spec from the user's saved settings, falling back to defaults.
+    static func fromSettings(defaults: UserDefaults = .standard) -> DaytonaCloudSandboxSpec {
+        let cpu = defaults.object(forKey: CloudMachineSettings.cpuKey) as? Int ?? CloudMachineSettings.defaultCPU
+        let memory = defaults.object(forKey: CloudMachineSettings.memoryKey) as? Int ?? CloudMachineSettings.defaultMemory
+        let disk = defaults.object(forKey: CloudMachineSettings.diskKey) as? Int ?? CloudMachineSettings.defaultDisk
+        let snapshot = defaults.string(forKey: CloudMachineSettings.snapshotKey)
+        return DaytonaCloudSandboxSpec(
+            cpu: cpu,
+            memory: memory,
+            disk: disk,
+            snapshot: snapshot ?? Self.default.snapshot,
+            region: nil,
+            language: nil
+        )
+    }
+}
+
+// MARK: - Machine Settings
+
+enum CloudMachineSettings {
+    static let cpuKey = "cloud.machine.cpu"
+    static let memoryKey = "cloud.machine.memory"
+    static let diskKey = "cloud.machine.disk"
+    static let snapshotKey = "cloud.machine.snapshot"
+
+    static let defaultCPU = 2
+    static let defaultMemory = 4
+    static let defaultDisk = 20
+
+    static let cpuSteps = [1, 2, 4, 8]
+    static let memorySteps = [1, 2, 4, 8, 16]
+    static let diskSteps = [10, 20, 50, 100]
+}
+
+// MARK: - Doppler Integration
+
+struct DopplerIntegrationConfig: Codable, Equatable, Sendable {
+    /// The Doppler service token (dp.st.xxx format).
+    let serviceToken: String
+    /// The project name (for display only; the token encodes project+config).
+    let project: String?
+    /// The config name (for display only).
+    let config: String?
 }
 
 // MARK: - Cloud Configuration
@@ -38,18 +82,28 @@ struct DaytonaCloudConfiguration: Codable, Equatable, Sendable {
     /// Auto-stop interval in minutes (0 = never).
     var autoStopInterval: Int?
 
+    /// Parsed `.devcontainer/devcontainer.json` from the local repo, if present.
+    var devContainer: DevContainerConfig?
+
+    /// Optional Doppler secrets integration.
+    var doppler: DopplerIntegrationConfig?
+
     init(
         sandboxSpec: DaytonaCloudSandboxSpec = .default,
         gitSetupScript: String? = nil,
         workspaceLabel: String? = nil,
         resolvedSandboxID: String? = nil,
-        autoStopInterval: Int? = nil
+        autoStopInterval: Int? = nil,
+        devContainer: DevContainerConfig? = nil,
+        doppler: DopplerIntegrationConfig? = nil
     ) {
         self.sandboxSpec = sandboxSpec
         self.gitSetupScript = gitSetupScript
         self.workspaceLabel = workspaceLabel
         self.resolvedSandboxID = resolvedSandboxID
         self.autoStopInterval = autoStopInterval
+        self.devContainer = devContainer
+        self.doppler = doppler
     }
 }
 
@@ -59,7 +113,10 @@ enum DaytonaCloudMachineState: String, Codable, Sendable {
     case creating
     case starting
     case waitingForSSH
+    case connecting
+    case settingUpDevContainer
     case cloningRepository
+    case settingUpDoppler
     case ready
     case stopping
     case stopped
@@ -72,6 +129,7 @@ enum DaytonaCloudMachineState: String, Codable, Sendable {
 
 extension DaytonaCloudConfiguration {
     /// Builds a shell script that clones a repo and checks out the right branch/PR on the sandbox.
+    /// When `githubToken` is provided, git credential storage is configured so clone, push, pull all work.
     static func buildGitSetupScript(
         mode: String,
         repoURL: String,
@@ -79,7 +137,8 @@ extension DaytonaCloudConfiguration {
         baseBranch: String? = nil,
         newBranchName: String? = nil,
         prNumber: Int? = nil,
-        repoSlug: String? = nil
+        repoSlug: String? = nil,
+        githubToken: String? = nil
     ) -> String {
         let installGit = """
         if ! command -v git >/dev/null 2>&1; then
@@ -92,6 +151,18 @@ extension DaytonaCloudConfiguration {
         fi
         """
 
+        // Set up git credential storage so clone/push/pull/fetch all work with private repos.
+        let setupCredentials: String
+        if let token = githubToken, !token.isEmpty {
+            setupCredentials = """
+            git config --global credential.helper store
+            printf \(shellEscape("https://x-access-token:\(token)@github.com\\n")) > ~/.git-credentials
+            chmod 600 ~/.git-credentials
+            """
+        } else {
+            setupCredentials = ""
+        }
+
         switch mode {
         case "create_branch":
             let base = baseBranch ?? "main"
@@ -99,6 +170,7 @@ extension DaytonaCloudConfiguration {
             return """
             set -e
             \(installGit)
+            \(setupCredentials)
             echo "Cloning \(shellEscape(repoURL))..."
             git clone --branch \(shellEscape(base)) \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo
@@ -111,6 +183,7 @@ extension DaytonaCloudConfiguration {
             return """
             set -e
             \(installGit)
+            \(setupCredentials)
             echo "Cloning \(shellEscape(repoURL)) (branch: \(shellEscape(branch)))..."
             git clone --branch \(shellEscape(branch)) \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo
@@ -119,29 +192,33 @@ extension DaytonaCloudConfiguration {
 
         case "import_pr":
             let num = prNumber ?? 0
-            let slug = repoSlug ?? ""
             return """
             set -e
             \(installGit)
+            \(setupCredentials)
             echo "Cloning \(shellEscape(repoURL))..."
             git clone \(shellEscape(repoURL)) /home/daytona/repo
             cd /home/daytona/repo
-            if command -v gh >/dev/null 2>&1; then
-                gh pr checkout \(num)\(slug.isEmpty ? "" : " --repo \(shellEscape(slug))")
-            else
-                echo "Installing gh CLI..."
-                (type -p wget >/dev/null || (apt-get update -qq && apt-get install -y -qq wget >/dev/null 2>&1)) && \
-                wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null && \
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list >/dev/null && \
-                apt-get update -qq && apt-get install -y -qq gh >/dev/null 2>&1
-                gh pr checkout \(num)\(slug.isEmpty ? "" : " --repo \(shellEscape(slug))")
-            fi
+            echo "Checking out PR #\(num)..."
+            git fetch origin pull/\(num)/head:pr-\(num)
+            git checkout pr-\(num)
             echo "Ready on PR #\(num)"
             """
 
         default:
             return ""
         }
+    }
+
+    /// Builds a shell script that writes `DOPPLER_TOKEN` to shell profiles on the sandbox.
+    static func buildDopplerSetupScript(token: String) -> String {
+        let escaped = shellEscape(token)
+        return """
+        echo "export DOPPLER_TOKEN=\(escaped)" >> ~/.bashrc
+        echo "export DOPPLER_TOKEN=\(escaped)" >> ~/.profile
+        export DOPPLER_TOKEN=\(escaped)
+        echo "Doppler configured"
+        """
     }
 
     private static func shellEscape(_ s: String) -> String {

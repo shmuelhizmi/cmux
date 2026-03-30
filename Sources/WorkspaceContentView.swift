@@ -375,8 +375,24 @@ struct WorkspaceContentView: View {
             )
         }
 
+        let _ = {
+            #if DEBUG
+            if workspace.cloudConfiguration != nil {
+                dlog("daytona.overlay.eval wsId=\(workspace.id) state=\(workspace.cloudMachineState.rawValue) showOverlay=\(shouldShowProvisioningOverlay)")
+            }
+            #endif
+        }()
+
         if shouldShowProvisioningOverlay {
             CloudProvisioningOverlay(workspace: workspace)
+#if DEBUG
+                .onAppear {
+                    dlog("daytona.overlay.appear wsId=\(workspace.id) state=\(workspace.cloudMachineState.rawValue) hasCloudConfig=\(workspace.cloudConfiguration != nil)")
+                }
+                .onDisappear {
+                    dlog("daytona.overlay.disappear wsId=\(workspace.id) state=\(workspace.cloudMachineState.rawValue)")
+                }
+#endif
         } else if isMinimalMode {
             bonsplitView
                 .ignoresSafeArea(.container, edges: .top)
@@ -394,7 +410,7 @@ struct WorkspaceContentView: View {
     private var shouldShowProvisioningOverlay: Bool {
         guard workspace.cloudConfiguration != nil else { return false }
         switch workspace.cloudMachineState {
-        case .creating, .starting, .waitingForSSH, .cloningRepository, .error:
+        case .creating, .starting, .waitingForSSH, .connecting, .settingUpDevContainer, .cloningRepository, .settingUpDoppler, .error:
             return true
         default:
             return false

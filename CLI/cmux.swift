@@ -4347,7 +4347,10 @@ struct CMUXCLI {
         let (nameOpt, rem6) = parseOption(rem5, name: "--name")
         let (sandboxOpt, rem7) = parseOption(rem6, name: "--sandbox")
         let (tokenOpt, rem8) = parseOption(rem7, name: "--token")
-        let (autoStopOpt, remaining) = parseOption(rem8, name: "--auto-stop")
+        let (autoStopOpt, rem9) = parseOption(rem8, name: "--auto-stop")
+        let (dopplerTokenOpt, rem10) = parseOption(rem9, name: "--doppler-token")
+        let (dopplerProjectOpt, rem11) = parseOption(rem10, name: "--doppler-project")
+        let (dopplerConfigOpt, remaining) = parseOption(rem11, name: "--doppler-config")
 
         if let unknown = remaining.first(where: { $0.hasPrefix("--") }) {
             throw CLIError(message: "cloud: unknown flag '\(unknown)'. Run 'cmux cloud --help' for usage.")
@@ -4380,6 +4383,12 @@ struct CMUXCLI {
         if let sandboxOpt { provisionParams["sandbox_id"] = sandboxOpt }
         if let tokenOpt { provisionParams["token"] = tokenOpt }
         if let autoStopOpt, let interval = Int(autoStopOpt) { provisionParams["auto_stop_interval"] = interval }
+
+        // Doppler secrets integration — pass params to the app-side socket handler
+        // which creates the service token via DopplerService.
+        if let dopplerTokenOpt { provisionParams["doppler_token"] = dopplerTokenOpt }
+        if let dopplerProjectOpt { provisionParams["doppler_project"] = dopplerProjectOpt }
+        if let dopplerConfigOpt { provisionParams["doppler_config"] = dopplerConfigOpt }
 
         let provision = try client.sendV2(method: "workspace.cloud.provision", params: provisionParams)
 
@@ -6558,11 +6567,15 @@ struct CMUXCLI {
               --sandbox <id>          Resume a specific stopped sandbox
               --token <token>         Daytona API key (or DAYTONA_API_KEY env)
               --auto-stop <minutes>   Auto-stop after N minutes of inactivity (default: none)
+              --doppler-token <tok>   Doppler service token to inject as DOPPLER_TOKEN
+              --doppler-project <p>   Doppler project (creates a service token with --doppler-config)
+              --doppler-config <c>    Doppler config (requires --doppler-project)
 
             Example:
               cmux cloud
               cmux cloud --snapshot daytona-medium --cpus 2 --memory 4
               cmux cloud --sandbox abc123
+              cmux cloud --doppler-project myapp --doppler-config dev
             """
         case "cloud-stop":
             return """

@@ -13,12 +13,12 @@ enum DaytonaAuthTokenStore {
     private static var cachedToken: String?
     private static var cacheLoaded = false
 
-    /// Returns the Daytona API key, checking cache, Keychain, then environment.
+    /// Returns the Daytona API key, checking cache, file/Keychain, then environment.
     static func token() -> String? {
         if cacheLoaded, let cached = cachedToken {
             return cached
         }
-        if let stored = loadFromKeychain() {
+        if let stored = loadToken() {
             cachedToken = stored
             cacheLoaded = true
             return stored
@@ -32,9 +32,19 @@ enum DaytonaAuthTokenStore {
         return nil
     }
 
-    /// Stores the API key in the macOS Keychain.
+    /// Stores the API key.
+    /// In DEBUG builds, writes to a plain file to avoid Keychain prompts.
+    /// In release builds, uses the macOS Keychain.
     @discardableResult
     static func setToken(_ token: String) -> Bool {
+#if DEBUG
+        let success = saveToDebugFile(token)
+        if success {
+            cachedToken = token
+            cacheLoaded = true
+        }
+        return success
+#else
         #if canImport(Security)
         deleteFromKeychain()
         guard let data = token.data(using: .utf8) else { return false }
@@ -54,17 +64,63 @@ enum DaytonaAuthTokenStore {
         #else
         return false
         #endif
+#endif
     }
 
-    /// Removes the API key from the Keychain.
+    /// Removes the API key.
     @discardableResult
     static func clearToken() -> Bool {
         cachedToken = nil
         cacheLoaded = false
+#if DEBUG
+        return deleteDebugFile()
+#else
         return deleteFromKeychain()
+#endif
     }
 
     // MARK: - Private
+
+    private static func loadToken() -> String? {
+#if DEBUG
+        return loadFromDebugFile()
+#else
+        return loadFromKeychain()
+#endif
+    }
+
+    // MARK: - Debug File Storage
+
+#if DEBUG
+    private static var debugTokenFilePath: String {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("cmux/debug", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("daytona-api-key").path
+    }
+
+    private static func loadFromDebugFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: debugTokenFilePath),
+              let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            return nil
+        }
+        return token
+    }
+
+    private static func saveToDebugFile(_ token: String) -> Bool {
+        let path = debugTokenFilePath
+        return FileManager.default.createFile(atPath: path, contents: Data(token.utf8))
+    }
+
+    @discardableResult
+    private static func deleteDebugFile() -> Bool {
+        try? FileManager.default.removeItem(atPath: debugTokenFilePath)
+        return true
+    }
+#endif
+
+    // MARK: - Keychain
 
     private static func loadFromKeychain() -> String? {
         #if canImport(Security)
