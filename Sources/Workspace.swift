@@ -10899,7 +10899,7 @@ extension Workspace: BonsplitDelegate {
         case .toggleZoom:
             guard let panelId = panelIdFromSurfaceId(tab.id) else { return }
             toggleSplitZoom(panelId: panelId)
-        @unknown default:
+        case .moveToLeftPane, .moveToRightPane:
             break
         }
     }
